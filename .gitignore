@@ -1,0 +1,30 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Node (week 9 onwards)
+node_modules/
+.next/
+out/
+dist/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local artefacts
+.edge-profile/
+.edge2/
+*.tmp

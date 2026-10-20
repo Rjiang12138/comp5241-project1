@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Praxis — Build your own path</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="player-top">
+  <a class="exit" href="index.html" title="Home">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg>
+  </a>
+  <div>
+    <div class="player-title">My learning</div>
+    <div class="player-sub">Self-directed path</div>
+  </div>
+  <div style="margin-left:auto" class="row">
+    <a class="btn btn-sm" href="learn.html">Resume last course</a>
+    <a class="btn btn-sm" href="course.html">Instructor view</a>
+    <span class="avatar">MW</span>
+  </div>
+</div>
+
+<div class="page" style="max-width:1260px;margin:0 auto">
+
+  <div class="page-head">
+    <div>
+      <h1 style="font-size:24px">Build a path, not a playlist</h1>
+      <p>Tell Praxis where you want to be. It sequences existing mini-courses and generates the missing ones.</p>
+    </div>
+    <span class="pill pill-teal">2 min to generate</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:348px minmax(0,1fr);gap:18px;align-items:start">
+
+    <!-- ------------------------------------------------------ left: brief -->
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><h3>Your goal</h3><span class="tiny muted">step 1 of 2</span></div>
+        <div class="card-body">
+          <div class="field">
+            <label>What do you want to be able to do?</label>
+            <textarea class="textarea" style="min-height:74px">Prepare for a backend engineering internship interview in four weeks. I study business, not CS, and I have only written small scripts.</textarea>
+          </div>
+
+          <div class="field">
+            <label>Domain</label>
+            <div class="seg" data-seg="domain" style="flex-wrap:wrap">
+              <button data-val="backend" class="on">Backend</button>
+              <button data-val="data">Data</button>
+              <button data-val="product">Product</button>
+              <button data-val="design">Design</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Starting point</label>
+            <div class="seg" data-seg="level">
+              <button data-val="beg" class="on">Beginner</button>
+              <button data-val="some">Some code</button>
+              <button data-val="conf">Confident</button>
+            </div>
+          </div>
+
+          <div class="field mb-0">
+            <label>Time you can give it</label>
+            <div class="seg" data-seg="time">
+              <button data-val="2">2 h / week</button>
+              <button data-val="4" class="on">4 h / week</button>
+              <button data-val="8">8 h / week</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-body" style="border-top:1px solid var(--line-2);padding-top:14px">
+          <button class="btn btn-primary" id="buildPath" style="width:100%;justify-content:center">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+            Design my path
+          </button>
+          <div class="tiny muted" style="text-align:center;margin-top:8px">Matches your level, not an average learner's.</div>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="eyebrow">Already in the library</div>
+        <div class="stack mt-12" style="gap:9px">
+          <div class="between" style="font-size:12.5px"><span>Software Engineering Foundations</span><span class="tiny muted">47 min</span></div>
+          <div class="between" style="font-size:12.5px"><span>Working with AI coding agents</span><span class="tiny muted">35 min</span></div>
+          <div class="between" style="font-size:12.5px"><span>Read a code review like a reviewer</span><span class="tiny muted">28 min</span></div>
+        </div>
+        <div class="footnote">Two of the four steps below are generated on demand — they do not exist in the library yet.</div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------ right: path -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3>Backend internship · 4-week path</h3>
+          <div class="tiny muted" style="margin-top:2px">4 steps · 9 activities · 4 h / week · adapted to beginner, non-CS</div>
+        </div>
+        <div class="row">
+          <span class="pill pill-brand">AI-sequenced</span>
+          <button class="btn btn-sm">Edit</button>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="timeline">
+
+          <div class="tl-item done">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div class="row" style="gap:8px"><b style="font-size:13.6px">Week 1 · Learn what the job actually is</b><span class="pill pill-teal">done</span></div>
+                <div class="tiny muted" style="margin-top:3px">2 h · 3 activities · from the library</div>
+              </div>
+              <span class="tiny muted">100%</span>
+            </div>
+            <div class="wrap mt-8">
+              <span class="pill pill-line">Software Engineering Foundations · M1–M2</span>
+              <span class="pill pill-line">What a backend engineer ships in a week</span>
+            </div>
+          </div>
+
+          <div class="tl-item now">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div class="row" style="gap:8px"><b style="font-size:13.6px">Week 2 · Build one real service</b><span class="pill pill-brand">you are here</span></div>
+                <div class="tiny muted" style="margin-top:3px">2 h · 2 activities · generated for this path</div>
+              </div>
+              <span class="tiny muted">40%</span>
+            </div>
+            <div class="wrap mt-8">
+              <span class="pill pill-teal">Code lab · build a REST endpoint with an agent</span>
+              <span class="pill pill-line">Reading · how HTTP actually works</span>
+            </div>
+            <div class="tiny muted mt-8" style="line-height:1.6">
+              Generated because your goal mentions an interview: the lab ends with a 3-minute explanation of your own design,
+              which is the part candidates usually fail.
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div class="row" style="gap:8px"><b style="font-size:13.6px">Week 3 · Review code you did not write</b><span class="pill">not started</span></div>
+                <div class="tiny muted" style="margin-top:3px">1.5 h · 2 activities · from the library</div>
+              </div>
+              <span class="tiny muted">0%</span>
+            </div>
+            <div class="wrap mt-8">
+              <span class="pill pill-amber">Role play · design review with an AI reviewer</span>
+              <span class="pill pill-line">Checklist · what to look for in a diff</span>
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div class="row" style="gap:8px"><b style="font-size:13.6px">Week 4 · Practise the interview itself</b><span class="pill">not started</span></div>
+                <div class="tiny muted" style="margin-top:3px">1.5 h · 2 activities · generated for this path</div>
+              </div>
+              <span class="tiny muted">0%</span>
+            </div>
+            <div class="wrap mt-8">
+              <span class="pill pill-amber">Mock interview · 25 min, scored against a rubric</span>
+              <span class="pill pill-line">Reflection · what to fix before the real one</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card-body" style="border-top:1px solid var(--line-2);background:#fbfbfd;border-radius:0 0 12px 12px">
+        <div class="between">
+          <div class="row tiny muted" style="max-width:560px;line-height:1.5">
+            <span style="color:#4338ca">◈</span>
+            Why this order: you cannot review a diff before you have shipped one, and you cannot explain a design
+            you have not defended. Each step unlocks the evidence the next one needs.
+          </div>
+          <div class="row">
+            <button class="btn btn-sm">Swap a step</button>
+            <button class="btn btn-sm btn-primary">Add to my path</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card card-pad mt-16" style="display:flex;align-items:center;gap:14px">
+    <div style="width:34px;height:34px;border-radius:9px;background:#ecfdf5;color:#0f766e;display:grid;place-items:center">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:600">Need a subject Praxis has never taught?</div>
+      <div class="tiny muted" style="margin-top:2px">Generate a mini-course for any domain — then it becomes available to everyone in the library.</div>
+    </div>
+    <button class="btn btn-sm">Generate a new course</button>
+  </div>
+
+</div>
+<script src="js/app.js"></script>
+</body>
+</html>
