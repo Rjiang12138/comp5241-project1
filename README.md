@@ -67,14 +67,15 @@ interaction model and the information architecture before we commit to an implem
 
 ## Team
 
-| Member | Role | Owns |
-| --- | --- | --- |
-| _name / student ID_ | Product & AI pipeline | brief → outline generation, prompt registry, evaluation |
-| _name / student ID_ | Learning runtime | course player, code lab, hinting, activity state |
-| _name / student ID_ | Instructor & data | course editor, cohorts, analytics |
-| _name / student ID_ | Platform & experience | design system, auth, deployment, CI |
+Four members, four vertical workstreams (names and student IDs are on the week 3 group-formation
+form).
 
-> Replace the placeholder rows with the four group members before submitting.
+| Workstream | Owns |
+| --- | --- |
+| Product & AI pipeline | brief → outline generation, prompt registry, evaluation |
+| Learning runtime | course player, code lab, hinting, activity state |
+| Instructor & data | course editor, cohorts, analytics |
+| Platform & experience | design system, auth, deployment, CI |
 
 ## Documents
 

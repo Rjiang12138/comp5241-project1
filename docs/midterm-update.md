@@ -181,16 +181,19 @@ Core entities: `users` (learner / instructor / admin), `courses`, `modules`, `ac
 
 ## 7. Division of work
 
-| Member | Primary responsibility | Visible artefacts |
+Four workstreams, one per member. Each is a vertical slice of the product — one person owns a
+feature from screen to data — rather than a horizontal layer.
+
+| Workstream | Covers | Where it shows |
 | --- | --- | --- |
-| _Member A — name / ID_ | Product framing, AI pipeline, prompt registry, evaluation | `docs/ai-usage-log.md`, generation service |
-| _Member B — name / ID_ | Learning runtime: player, code lab, hinting, activity state | `learn.html` → Next.js runtime |
-| _Member C — name / ID_ | Instructor surface: editor, cohorts, analytics | `studio.html`, `course.html`, `analytics.html` |
-| _Member D — name / ID_ | Platform: design system, auth, deployment, CI | `styles.css`, deployment pipeline |
+| Product & AI pipeline | framing, prompt registry, generation checks, evaluation | `studio.html` generation flow, `docs/ai-usage-log.md` |
+| Learning runtime | player, code lab, hint ladder, activity state | `learn.html` |
+| Instructor surface | editor, cohorts, analytics | `studio.html`, `course.html`, `analytics.html` |
+| Platform & experience | design system, auth, deployment, CI | `styles.css`, deployment pipeline |
 
-Shared: requirement interviews, prototype reviews, documentation, slides.
+Shared and rotating: requirement interviews, prototype reviews, documentation, slides.
 
-> Replace the four placeholder rows with real names and student IDs before submitting.
+Names and student IDs are on the week 3 group-formation form.
 
 ## 8. How we work with AI
 
