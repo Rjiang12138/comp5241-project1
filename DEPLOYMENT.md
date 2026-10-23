@@ -141,6 +141,9 @@ worth knowing before a demo. The one-line mitigation, if you want it, is to gate
 
 - [ ] `npm run build` passes locally
 - [ ] The preview URL opens and `/courses` renders six courses
+- [ ] The preview root (`/`) shows the Praxis workspace, **not** the static
+      `index.html` that GitHub Pages uses — if it shows the static one, the
+      project was detected as "Other" instead of "Next.js"
 - [ ] The course editor saves: change a module title, reload, the change survives
 - [ ] `/admin` redirects to `/login` when signed in as an instructor, and renders
       when signed in as admin
