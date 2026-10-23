@@ -116,6 +116,27 @@ on the thing it describes instead of reading a description of it.
 
 Production URL: `<fill in after the first deploy>`
 
+### Does the code have to be on GitHub first?
+
+Vercel itself does not require it. `npx vercel deploy` uploads the working
+directory and builds it, with no repository involved. That path is not used
+here, for three reasons:
+
+1. **`main` has no `package.json`.** Until the branch is merged, importing the
+   repository gives Vercel a folder containing `prototype/`, `docs/` and a
+   static `index.html` — a GitHub Pages site, not a Next.js app. The framework
+   preset has to be set to **Next.js** by hand or the build is a static copy.
+2. **A CLI deploy cannot be traced to a commit.** The dashboard shows an
+   upload, not a SHA, so "this URL is the code we reviewed" stops being
+   checkable — which is the whole point of the preview link on a board card.
+3. **Previews come from pull requests.** A CLI deploy produces one URL. The
+   board's definition of done asks for a URL per finished task, and that only
+   exists when Vercel is watching the repository.
+
+So: merge first, then import. If the repository cannot be pushed at all, the
+CLI is a legitimate fallback for a demo — write down that the URL was uploaded
+rather than built from `main`, because the difference matters at review time.
+
 ### Do not run `db:seed` or `db:reset` on the deployed database
 
 There is one database, not one per environment. The `db:*` scripts are local
