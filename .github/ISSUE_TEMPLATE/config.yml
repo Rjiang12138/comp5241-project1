@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Deployment and local setup
+    url: https://github.com/Rjiang12138/comp5241-project1/blob/main/DEPLOYMENT.md
+    about: Read this before opening an issue about the app not starting.
+  - name: Test plan
+    url: https://github.com/Rjiang12138/comp5241-project1/blob/main/docs/test-plan.md
+    about: What we test, how we test it, and what the coverage claim actually means.

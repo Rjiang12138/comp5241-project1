@@ -7,10 +7,12 @@ one-paragraph brief; Praxis drafts the module sequence, builds the activities (c
 stakeholder simulations), and adapts the wording to each learner's background. Learners get a path,
 not a playlist — they can also generate their own.
 
-> **Status: mid-term milestone (Week 8).**
-> A high-fidelity, clickable prototype is complete and lives in [`prototype/`](prototype).
-> Screenshots are in [`docs/screenshots/`](docs/screenshots).
-> The production build (Next.js + Postgres + LLM provider) starts in Week 9.
+> **Status: week 9 — the app exists, the pipeline does not.**
+> The Next.js application runs, with a working course editor, a minimal admin
+> console and role-based sessions. The learner runtime, the generation pipeline
+> and the analytics are still the week 8 prototype, mounted at the same routes.
+> The mid-term prototype is untouched in [`prototype/`](prototype) and remains
+> the visual reference for every screen.
 
 ![Landing page](docs/screenshots/index.png)
 
@@ -18,14 +20,34 @@ not a playlist — they can also generate their own.
 
 ## Quick start
 
-The prototype is plain HTML, CSS and JavaScript — no build step, no dependencies, no network calls.
+```bash
+npm install
+# one-time: put DATABASE_URL + DATABASE_URL_UNPOOLED in .env.local
+#   (neon init && neon login && neon deploy does it for you)
+npm run db:push      # create the tables
+npm run db:seed      # load the prototype fixture data
+npm run dev          # http://localhost:3000
+```
+
+Data lives in a Neon Postgres branch. You land as **Dr. R. Kwok** (instructor);
+`/login` switches role — pick **A. Tse** to see the admin console.
+
+| Route | What it is | Owner |
+| --- | --- | --- |
+| `/` | landing | R1 |
+| `/studio` | instructor authoring (prototype) | R4 |
+| `/courses` | course list | R3 |
+| `/courses/[id]` | **course editor** — modules, activities, ordering, publishing, versions | R3 |
+| `/learn` | learner code lab (prototype) | R2 |
+| `/insights` | cohort analytics (prototype) | R4 |
+| `/path` | self-directed path builder (prototype) | R5 |
+| `/admin` | **cohorts and teaching assignments** | R3 |
+| `/login` | role switch | R3 |
+
+The prototype is still directly openable and is the thing to change first if a
+style needs to move:
 
 ```bash
-# option 1: just open it
-start prototype/index.html          # Windows
-open  prototype/index.html          # macOS
-
-# option 2: serve it (recommended, keeps relative links consistent)
 python -m http.server 8080 --directory prototype
 # then visit http://localhost:8080
 ```
@@ -37,18 +59,42 @@ path builder).
 ## Repository layout
 
 ```
-prototype/            clickable prototype (static HTML/CSS/JS)
-  css/styles.css      design system: tokens, components, layout
-  js/app.js           interactions: generation log, test runner, tutor modes, path builder
-docs/
-  midterm-update.md   Week 8 progress update (the submitted document)
-  requirements.md     requirement traceability against the project brief
-  architecture.md     target architecture and technical decisions
-  ai-usage-log.md     AI Fluency 4D log: what we delegated, prompted, checked, recorded
-  screenshots/        six prototype screens, 2x resolution
-tools/
-  trim_screenshots.py helper used to trim the captured screenshots
+app/                  Next.js App Router
+  globals.css         the design system, copied verbatim from prototype/css/styles.css
+  additions.css       components the prototype did not have (editor, admin, sign-in)
+  courses/            list + editor, with server actions in actions.ts
+  admin/              cohorts and teaching assignments
+  studio|learn|insights|path/   routes that mount the ported prototype screens
+components/
+  Shell.tsx           sidebar + topbar, copied from prototype/course.html
+  ported/             prototype screens converted to JSX by tools/html_to_tsx.py
+  AutoSubmitInput.tsx inline fields that save their form on blur
+  PrototypeScripts.tsx transitional: runs prototype/js/app.js behaviours app-wide
+lib/
+  types.ts            domain types, mirroring prisma/schema.prisma
+  store.ts            data access — file-backed today, Prisma in week 10
+  auth.ts             session + role guard
+  format.ts           label/pill mapping
+prisma/schema.prisma  target data model (cohorts, courses, modules, activities, events, ai_runs)
+prototype/            the week 8 prototype — untouched, and the visual reference
+docs/                 progress update, requirements, architecture, AI log, test plan, board guide
+tools/                html_to_tsx.py (prototype → JSX), trim_screenshots.py
+.github/              issue and PR templates, CI
 ```
+
+## How the two versions stay in step
+
+`prototype/` is the source of truth for the look. When a style has to change,
+change it there and re-run the converter — never hand-edit a ported screen:
+
+```bash
+cp prototype/css/styles.css app/globals.css
+python tools/html_to_tsx.py prototype/studio.html components/ported/Studio.tsx Studio
+```
+
+The converter copies markup verbatim and rewrites only what JSX requires. Screens
+that R2, R4 and R5 own will be replaced by real components in weeks 9–10; the
+generated files are a bridge, not the destination.
 
 ## What works in the prototype
 
@@ -67,18 +113,24 @@ interaction model and the information architecture before we commit to an implem
 
 ## Team
 
-Four members, four vertical workstreams (names and student IDs are on the week 3 group-formation
-form).
+Five workstreams, one per member. Each is a vertical slice of the product — one
+person owns a feature from screen to data — rather than a horizontal layer.
 
-| Workstream | Owns |
-| --- | --- |
-| Product & AI pipeline | brief → outline generation, prompt registry, evaluation |
-| Learning runtime | course player, code lab, hinting, activity state |
-| Instructor & data | course editor, cohorts, analytics |
-| Platform & experience | design system, auth, deployment, CI |
+| Workstream | Owns | Screens |
+| --- | --- | --- |
+| R1 演讲 | narrative, the pitch, the live demo | landing |
+| R2 制片 | course player, code lab, hinting, activity state | `/learn` |
+| R3 平台 | platform base, course editor, admin, deployment, testing | `/courses`, `/admin`, deploy + CI |
+| R4 AI 与数据 | generation pipeline, prompt registry, analytics | `/studio`, `/insights` |
+| R5 内容 | content, handbooks, peer-evaluation run | `/path` |
+
+Names and student IDs are on the week 3 group-formation form.
 
 ## Documents
 
+- [Deployment](DEPLOYMENT.md)
+- [Test plan](docs/test-plan.md)
+- [Working the board](docs/board.md)
 - [Mid-term progress update](docs/midterm-update.md)
 - [Requirement traceability](docs/requirements.md)
 - [Architecture](docs/architecture.md)

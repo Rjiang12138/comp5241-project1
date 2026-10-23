@@ -28,3 +28,27 @@ __pycache__/
 .edge-profile/
 .edge2/
 *.tmp
+
+# Next.js
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+
+# Prisma local database
+*.db
+*.db-journal
+prisma/migrations/dev.db
+
+# Test output
+test-results/
+playwright-report/
+coverage/
+
+# Local store written by lib/store.ts
+.data/
+.shots/
+.tmpcheck/
+
+# Neon CLI link state (project and branch ids; neon.ts is the committed policy)
+.neon
+.neon

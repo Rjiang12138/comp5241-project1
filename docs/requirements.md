@@ -20,7 +20,7 @@ what the prototype actually shows today. `[P]` = present in prototype, `[S]` = s
 | R13 | Public GitHub repository with code, documents and deliverables | must | this repository | [P] |
 | R14 | Meet stakeholders/users, collect requirements and feedback | must | interview notes to be added in week 8/9; three prototype revisions trace to feedback | [S] |
 | R15 | Study Anthropic's AI Fluency framework and reflect on its use | must | `ai-usage-log.md`, section in the final presentation | [P] docs |
-| R16 | Deploy to a publicly accessible platform | must (week 11) | not yet — Vercel target | [S] |
+| R16 | Deploy to a publicly accessible platform | must (week 11) | build and deploy pipeline ready; production URL lands week 11 | [S] |
 | R17 | 5–8 minute demo video, slides, final report, user manuals for admin/instructor/student | must (week 11) | not yet | [S] |
 
 ## Gaps we are consciously carrying into week 9
@@ -29,6 +29,11 @@ what the prototype actually shows today. `[P]` = present in prototype, `[S]` = s
    modelled in the activity taxonomy so the schema will not need to change.
 2. **Student import is a UI mock.** Real Moodle integration is an OAuth/CSV problem, not a UI problem;
    we will ship CSV first.
-3. **Admin role is deprioritised.** The brief implies it but never specifies it. A minimal admin view
-   (create cohort, assign instructor) lands in week 11.
-4. **No deployment yet.** The prototype runs locally; Vercel deployment is part of the week 9 skeleton.
+3. **Admin role is minimal by design.** The brief implies a third role but never
+   specifies it, so we built the two things a registry actually does — create a
+   cohort, assign its instructor — and stopped. It is reachable at `/admin`,
+   guarded on the server, and deliberately has no timetabling, reporting or
+   grade export. "We scoped it" is a better answer than "it is half-built".
+4. **No public URL yet.** The app builds, runs and is deployable, but the Vercel
+   project is created in week 11 alongside the demo video. Until then, reviewers
+   run it locally with `npm install && npm run dev` (see DEPLOYMENT.md).

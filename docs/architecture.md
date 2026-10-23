@@ -1,7 +1,11 @@
 # Architecture
 
-Status: **target design**, written during week 8. The prototype implements the information
-architecture and interaction model only; nothing below is running yet except the screens.
+Status: **target design**, written during week 8, realised through week 9.
+Running today: the app shell, routing, the course editor, the admin console,
+role-based sessions, the deployment pipeline, and Postgres on Neon through
+Prisma. The prototype still backs the learner runtime, the studio and the
+analytics screens. `lib/store.ts` is the only module that touches the database,
+so the AI pipeline (R4) can be built against the same seam.
 
 ## 1. Shape of the system
 
@@ -79,7 +83,8 @@ erDiagram
 | Table | Key fields |
 | --- | --- |
 | `users` | id, email, name, role (`learner`/`instructor`/`admin`), background (`non_cs`/`cs`), locale |
-| `courses` | id, title, brief, audience, minutes, status (`draft`/`review`/`published`), version, owner_id |
+| `cohorts` | id, code, name, term, instructor_id, created_at |
+| `courses` | id, title, brief, audience, minutes, status (`draft`/`review`/`published`), version, owner_id, cohort_id |
 | `modules` | id, course_id, position, title, objective, estimated_minutes |
 | `activities` | id, module_id, format (`reading`/`simulation`/`code_lab`/`role_play`/`quiz`/`game`/`narrated_slides`), payload JSONB, rubric JSONB |
 | `enrollments` | id, course_id, user_id, imported_from, created_at |
@@ -110,12 +115,20 @@ a refusal rate is a useful health metric for the course, not an error.
 
 | Module | Responsibility | Owner |
 | --- | --- | --- |
-| `lib/ai` | provider interface, prompt rendering, retries, cost logging | Member A |
-| `lib/course` | generation pipeline, schema validation, pedagogy checks | Member A |
-| `app/learn` | activity runtime, attempt state, hint policy, sandbox calls | Member B |
-| `app/studio`, `app/courses` | authoring, versions, publishing, cohort import | Member C |
-| `app/insights`, `lib/analytics` | event rollups, at-risk detection, insight generation | Member C |
-| `lib/ui`, `app/layout` | design system, shell, auth guard, deployment | Member D |
+| `lib/ai` | provider interface, prompt rendering, retries, cost logging | R4 |
+| `lib/course` | generation pipeline, schema validation, pedagogy checks | R4 |
+| `app/learn` | activity runtime, attempt state, hint policy, sandbox calls | R2 |
+| `app/studio` | brief → outline authoring flow, generation log | R4 |
+| `app/courses` | course editor, versions, publishing, cohort import | R3 |
+| `app/admin` | cohorts, teaching assignments — the brief's third role | R3 |
+| `app/insights`, `lib/analytics` | event rollups, at-risk detection, insight generation | R4 |
+| `lib/ui`, `app/layout`, `lib/auth` | design system, shell, session and role guard, deployment, CI | R3 |
+| `lib/store` | data access; the seam every page talks to | R3 |
+
+One table was added to §3 during the week 9 build: `cohorts`. The admin role needs
+a class to exist as an object with an owner, and the prototype already renders
+"Cohort · COMP5241 L01" as a first-class thing. Enrolments point at it, courses
+attach to it, one instructor is responsible for it.
 
 ## 6. Non-functional targets
 

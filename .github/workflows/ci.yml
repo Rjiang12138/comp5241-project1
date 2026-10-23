@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same branch cancels the first run: the older result can
+# no longer be acted on, and the free tier is finite.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          # Generate only needs the datasource block to be valid; no connection
+          # is opened. A placeholder keeps CI independent of the real branch.
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          DATABASE_URL_UNPOOLED: postgresql://ci:ci@localhost:5432/ci
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Check the prototype still matches the ported screens
+        run: |
+          # If prototype/css/styles.css changed without a re-port, the two
+          # versions of the design system have drifted. Warn, do not fail:
+          # the port is allowed to lag by one commit.
+          if git diff --name-only origin/main...HEAD | grep -q '^prototype/css/styles.css$'; then
+            echo "::warning::prototype/css/styles.css changed — re-run tools/html_to_tsx.py and copy it to app/globals.css"
+          fi
