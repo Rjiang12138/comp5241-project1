@@ -1,0 +1,37 @@
+{
+  "name": "praxis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Praxis — a GenAI course studio for software engineering education (COMP5241 group project)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "typecheck": "tsc --noEmit",
+    "db:push": "dotenv -e .env.local -- prisma db push",
+    "db:seed": "dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts",
+    "db:studio": "dotenv -e .env.local -- prisma studio",
+    "db:reset": "dotenv -e .env.local -- prisma db push --force-reset && dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts",
+    "port:prototype": "python tools/html_to_tsx.py prototype/studio.html components/ported/Studio.tsx Studio"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.3",
+    "@neon/env": "^1.6.4",
+    "@prisma/client": "^6.2.1",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "dotenv-cli": "^11.0.0",
+    "prisma": "^6.2.1",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

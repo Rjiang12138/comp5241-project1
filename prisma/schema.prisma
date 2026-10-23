@@ -1,0 +1,233 @@
+// Praxis data model.
+//
+// Target schema for week 10, written to match docs/architecture.md §3. The
+// week 9 build runs on lib/store.ts (a file-backed store with the same shape);
+// switching over is `prisma db push` plus replacing the bodies in lib/store.ts.
+//
+// One addition to the architecture document: `cohorts`. The brief's admin role
+// needs a class to exist as an object with an owner, and the prototype already
+// renders "Cohort · COMP5241 L01" as a first-class thing. Enrolments point at
+// it, courses are attached to it, and one instructor is responsible for it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon's pooled URL (PgBouncer, transaction mode) cannot run DDL, so schema
+  // pushes and migrations go through the unpooled endpoint instead.
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+enum Role {
+  learner
+  instructor
+  admin
+}
+
+enum Background {
+  non_cs
+  cs
+}
+
+enum Audience {
+  non_cs
+  cs
+  mixed
+}
+
+enum CourseStatus {
+  draft
+  review
+  published
+}
+
+enum ActivityFormat {
+  reading
+  simulation
+  code_lab
+  role_play
+  quiz
+  game
+  narrated_slides
+  peer_review
+}
+
+enum AiPurpose {
+  outline
+  activity
+  tutor
+  insight
+}
+
+model User {
+  id         String     @id @default(cuid())
+  email      String     @unique
+  name       String
+  role       Role       @default(learner)
+  background Background @default(non_cs)
+  locale     String     @default("en")
+  createdAt  DateTime   @default(now())
+
+  authoredCourses Course[]     @relation("CourseOwner")
+  enrollments     Enrollment[]
+  taughtCohorts   Cohort[]     @relation("CohortInstructor")
+
+  @@index([role])
+}
+
+model Cohort {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  term         String
+  instructorId String
+  createdAt    DateTime @default(now())
+
+  instructor  User         @relation("CohortInstructor", fields: [instructorId], references: [id])
+  courses     Course[]
+  enrollments Enrollment[]
+
+  @@index([instructorId])
+}
+
+model Course {
+  id        String       @id @default(cuid())
+  title     String
+  brief     String       @default("")
+  audience  Audience     @default(mixed)
+  minutes   Int          @default(45)
+  status    CourseStatus @default(draft)
+  version   Int          @default(1)
+  code      String       @default("COMP5241")
+  term      String       @default("")
+  ownerId   String
+  cohortId  String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  owner       User          @relation("CourseOwner", fields: [ownerId], references: [id])
+  cohort      Cohort?       @relation(fields: [cohortId], references: [id])
+  modules     Module[]
+  enrollments Enrollment[]
+  aiRuns      AiRun[]
+  versions    CourseVersion[]
+
+  @@index([ownerId])
+  @@index([cohortId])
+}
+
+model Module {
+  id               String @id @default(cuid())
+  courseId         String
+  position         Int
+  title            String
+  objective        String @default("")
+  estimatedMinutes Int    @default(10)
+
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  activities Activity[]
+
+  @@unique([courseId, position])
+  @@index([courseId])
+}
+
+model Activity {
+  id       String         @id @default(cuid())
+  moduleId String
+  position Int
+  title    String
+  format   ActivityFormat @default(reading)
+  minutes  Int            @default(8)
+  /// Format-specific content: task, starter code, tests, hint ladder.
+  payload  Json?
+  /// Grading criteria for peer review and role play.
+  rubric   Json?
+
+  module Module  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  events Event[]
+  aiRuns AiRun[]
+
+  @@unique([moduleId, position])
+  @@index([moduleId])
+}
+
+model Enrollment {
+  id           String   @id @default(cuid())
+  courseId     String
+  userId       String
+  cohortId     String
+  importedFrom String   @default("manual")
+  createdAt    DateTime @default(now())
+
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cohort  Cohort  @relation(fields: [cohortId], references: [id])
+  events  Event[]
+
+  @@unique([courseId, userId])
+  @@index([cohortId])
+}
+
+/// Append-only. Analytics reads it; nothing mutates it.
+model Event {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  activityId   String?
+  type         String
+  payload      Json?
+  createdAt    DateTime @default(now())
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  activity   Activity?  @relation(fields: [activityId], references: [id])
+
+  @@index([enrollmentId, createdAt])
+  @@index([activityId, type])
+}
+
+model CourseVersion {
+  id        String   @id @default(cuid())
+  courseId  String
+  version   Int
+  note      String
+  createdAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, version])
+}
+
+/// Every model call is recorded: prompt version, tokens, latency, cost, and
+/// whether an instructor accepted the result.
+model AiRun {
+  id            String    @id @default(cuid())
+  purpose       AiPurpose
+  courseId      String?
+  activityId    String?
+  promptVersion String
+  model         String
+  tokensIn      Int       @default(0)
+  tokensOut     Int       @default(0)
+  latencyMs     Int       @default(0)
+  costUsd       Decimal   @default(0) @db.Decimal(10, 6)
+  acceptedBy    String?
+  createdAt     DateTime  @default(now())
+
+  course   Course?   @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  @@index([purpose, createdAt])
+}
+
+model PromptVersion {
+  id        String   @id @default(cuid())
+  purpose   AiPurpose
+  version   String
+  template  String
+  changelog String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([purpose, version])
+}
