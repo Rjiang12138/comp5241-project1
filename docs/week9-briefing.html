@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Praxis — week 9 briefing</title>
+<style>
+  @page { size: A4; margin: 13mm 14mm; }
+  @media screen { body { padding: 13mm 14mm; max-width: 820px; margin: 0 auto; } }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Georgia", "Times New Roman", serif;
+    font-size: 9.6pt;
+    line-height: 1.42;
+    color: #1a1a1a;
+  }
+  header { border-bottom: 2px solid #1a1a1a; padding-bottom: 5px; margin-bottom: 10px; }
+  h1 { font-size: 16pt; margin: 0 0 2px; letter-spacing: -0.2px; }
+  .sub { font-size: 9pt; color: #555; font-style: italic; }
+  h2 {
+    font-size: 10.5pt;
+    margin: 11px 0 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 2px;
+  }
+  p { margin: 0 0 5px; text-align: justify; }
+  table { width: 100%; border-collapse: collapse; margin: 3px 0 7px; font-size: 8.6pt; font-family: "Helvetica Neue", Arial, sans-serif; }
+  th { text-align: left; font-weight: 600; background: #f2f2f2; }
+  th, td { border-bottom: 1px solid #dcdcdc; padding: 3px 5px; vertical-align: top; }
+  tr:last-child td { border-bottom: 1px solid #bbb; }
+  code, pre { font-family: "Consolas", "Courier New", monospace; font-size: 8.4pt; }
+  pre { background: #f7f7f7; border-left: 2px solid #bbb; padding: 6px 8px; margin: 4px 0 7px; line-height: 1.35; overflow: hidden; }
+  ul { margin: 3px 0 6px; padding-left: 16px; }
+  li { margin-bottom: 3px; text-align: justify; }
+  b, strong { font-weight: 700; }
+  .lead { font-weight: 700; }
+  .foot { margin-top: 9px; padding-top: 5px; border-top: 1px solid #ccc; font-size: 8pt; color: #666; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Praxis — turning lecture material into adaptive mini-courses</h1>
+  <div class="sub">COMP5241 Software Engineering · group project · week 9 · progress, division of work, system design</div>
+</header>
+
+<h2>1. Where we are</h2>
+<p>The mid-term prototype was six static screens. Since then the platform behind them has been built: a
+Next.js application, a Postgres database, a session with role guards, and server actions that make the
+instructor screens write to it. The screens themselves are unchanged — the prototype is the source of truth
+for the interface, and every screen in the app is generated from it by a converter rather than re-typed.</p>
+
+<table>
+  <tr><th style="width:31%">Layer</th><th style="width:31%">State</th><th>Evidence</th></tr>
+  <tr><td>Interface, six screens</td><td>complete, visually identical to the prototype</td><td><code>prototype/</code> has one commit and no edits since</td></tr>
+  <tr><td>Application, Next.js 15 App Router</td><td>three surfaces wired to the database</td><td>course editor 55 of 57 controls, <code>/admin</code> 5 of 5, <code>/settings</code> 6 of 6</td></tr>
+  <tr><td>Data, Postgres on Neon + Prisma</td><td>live and seeded</td><td>6 courses · 20 modules · 22 activities · 24 learners</td></tr>
+  <tr><td>AI generation pipeline</td><td>not started</td><td>scheduled week 10</td></tr>
+  <tr><td>Deployment, automated tests</td><td>pipeline written, never executed</td><td>scheduled week 11</td></tr>
+</table>
+
+<h2>2. System design</h2>
+<pre>browser ──form POST──▶ server action ──▶ lib/store.ts ──▶ Prisma ──▶ Neon Postgres
+                            │
+                            └── revalidatePath ──▶ the same page re-renders</pre>
+
+<p><span class="lead">No hand-written API layer.</span> Every mutation is a server action. The form posts, the
+action validates, the store writes, the page re-renders. There is no REST endpoint to keep in sync with the UI
+and no client-side fetch for course data, so a screen cannot drift out of step with the schema it writes to.</p>
+
+<p><span class="lead">The prototype owns the interface.</span> <code>tools/html_to_tsx.py</code> converts
+<code>prototype/*.html</code> into the React components under <code>components/ported/</code>. Behaviour is added
+around the markup, not inside it. This is why the app looks exactly like the artefact reviewed in week 7, and why
+a design change is a one-line edit in one file followed by a re-run, not a sweep through six screens.</p>
+
+<p><span class="lead">Ten tables, one writer.</span> <code>users</code>, <code>cohorts</code>,
+<code>courses</code>, <code>modules</code>, <code>activities</code>, <code>enrollments</code>,
+<code>events</code>, <code>course_versions</code>, <code>ai_runs</code>, <code>prompt_versions</code>.
+<code>lib/store.ts</code> is the only module that writes; pages read through it. The unique
+<code>(courseId, position)</code> constraint on modules is why reordering and deletion need renumbering, and that
+logic lives in one place because of it.</p>
+
+<h2>3. Against the brief</h2>
+<table>
+  <tr><th style="width:42%">Requirement</th><th>State</th></tr>
+  <tr><td>R1–R3 mini-courses, topic coverage, seven activity formats</td><td>interface complete; five of seven formats modelled; games and AI narration specified, not built</td></tr>
+  <tr><td>R4–R5 audience adaptation and personalisation</td><td>rules and registers present in the UI; execution needs the generation step</td></tr>
+  <tr><td>R6–R7 instructor editing and AI course generation</td><td>editing is live and writes to the database; generation week 10</td></tr>
+  <tr><td>R8 cohort import and engagement tracking</td><td>cohorts and instructor assignment live; Moodle/CSV import still a mock</td></tr>
+  <tr><td>R10 learner-defined paths</td><td>screen present, behaviour week 10</td></tr>
+  <tr><td>R11 iterative prototyping</td><td>round 1 wireframes → round 2 hi-fi prototype → this build</td></tr>
+  <tr><td>R12 each member contributes visibly</td><td>ownership table in <code>midterm-update.md</code> §7; issues and PRs per feature</td></tr>
+  <tr><td>R13 public repository</td><td>present; the platform branch is merged in week 10</td></tr>
+  <tr><td>R14 stakeholder and user interviews</td><td>scheduled this week</td></tr>
+  <tr><td>R15 AI Fluency reflection</td><td><code>docs/ai-usage-log.md</code></td></tr>
+  <tr><td>R16 deploy to a public platform</td><td>pipeline ready, production URL week 11</td></tr>
+</table>
+
+<h2>4. Division of work</h2>
+<p>Four vertical slices, one per member, each owning a feature from screen to data rather than a horizontal layer.</p>
+<table>
+  <tr><th style="width:26%">Workstream</th><th style="width:42%">Covers</th><th>Where it shows</th></tr>
+  <tr><td>Product &amp; AI pipeline</td><td>framing, prompt registry, generation checks, evaluation</td><td>generation flow, <code>ai-usage-log.md</code></td></tr>
+  <tr><td>Learning runtime</td><td>player, code lab, hint ladder, activity state</td><td>the learner screen</td></tr>
+  <tr><td>Instructor surface</td><td>editor, cohorts, analytics</td><td>editor, cohort table, analytics</td></tr>
+  <tr><td>Platform &amp; experience</td><td>design system, auth, deployment, CI</td><td>design system, build and deploy pipeline</td></tr>
+</table>
+<p>Shared and rotating: requirement interviews, prototype reviews, documentation, slides. Names and student IDs
+are on the week 3 group-formation form.</p>
+
+<h2>5. What we are not claiming</h2>
+<ul>
+  <li><b>Three surfaces write to the database, four do not.</b> The course editor, the cohort registry and
+  settings are live. The studio form, the learner player, the path builder and the analytics page are still
+  prototype markup. We will demo the first three and describe the rest as designed, not built.</li>
+  <li><b>There is no authentication.</b> The session is a role switcher for demonstration; it is not a login.
+  Real accounts are out of scope for week 11.</li>
+  <li><b>No AI call has been made.</b> Every outline seen so far is fixture data. The generation step lands in
+  week 10, and the interface will say which mode produced a course.</li>
+</ul>
+
+<h2>6. Next three weeks</h2>
+<table>
+  <tr><th style="width:12%">Week</th><th>Work</th></tr>
+  <tr><td>9</td><td>learner runtime and hint ladder; interviews; merge the platform branch</td></tr>
+  <tr><td>10</td><td>generation pipeline against a real model; path builder; analytics queries</td></tr>
+  <tr><td>11</td><td>deploy, automated smoke tests, demo video, slides, report, user manuals</td></tr>
+</table>
+
+<div class="foot">Evidence for every claim above is in the repository: <code>docs/architecture.md</code>,
+<code>docs/test-plan.md</code> §8 (what was actually run, with output), <code>docs/requirements.md</code>
+(traceability), <code>docs/midterm-update.md</code> §7 (ownership).</div>
+
+</body>
+</html>
