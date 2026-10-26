@@ -37,3 +37,11 @@ what the prototype actually shows today. `[P]` = present in prototype, `[S]` = s
 4. **No public URL yet.** The app builds, runs and is deployable, but the Vercel
    project is created in week 11 alongside the demo video. Until then, reviewers
    run it locally with `npm install && npm run dev` (see DEPLOYMENT.md).
+5. **The interface is not translatable; the content is.** The prototype's
+   "Language · EN · 繁中 · 简中" row in *Adaptation rules* is a **content** rule,
+   not a UI toggle: it decides which language generated material is written in,
+   and it reads `users.locale` (`en` / `zh-Hant` / `zh-Hans`, already on every
+   row). Translating the chrome is a different job and is not in the brief — it
+   would mean two copies of every string across six screens that are generated
+   from `prototype/`, so a copy edit would have to be made twice. If it is ever
+   wanted, the place to do it is `tools/html_to_tsx.py`, not the components.
