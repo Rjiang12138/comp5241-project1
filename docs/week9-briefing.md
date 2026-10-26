@@ -104,7 +104,10 @@ slides. Names and student IDs are on the week 3 group-formation form.
 
 # Appendix — for us, not part of the handout
 
-## A. Eight-minute walkthrough
+## A. If you are the one talking (eight minutes)
+
+The brief asks for a group discussion of five to ten minutes, not a solo talk, and
+it does not say who speaks. This is the running order if it falls to you.
 
 | Time | Say | Do |
 | --- | --- | --- |
@@ -113,11 +116,34 @@ slides. Names and student IDs are on the week 3 group-formation form.
 | 2:00 | "This is the part that did not exist in week 7." Change a module title, reload. | `/courses/c-sef` |
 | 4:00 | Show the cohort registry: create a class, assign an instructor, it persists. | `/admin` |
 | 5:30 | Reset the demo data from the browser, so the next run starts clean. | `/settings` |
-| 6:30 | Name the limits out loud — three screens wired, three not, no AI yet, no deploy yet. | — |
+| 6:30 | Name the limits out loud — three surfaces wired, four still markup, no AI yet, no deploy yet. | — |
 | 7:30 | Next three weeks, one sentence each. | — |
 
 The one thing not to do: click a control on the four prototype screens. They look
 alive and do nothing. If asked to, say so before clicking.
+
+## A2. If you are not the one talking
+
+Then the handout is the deliverable and the demo is somebody else's problem. What
+is still yours is the sixty seconds when the platform comes up, because nobody
+else can answer for it:
+
+> "The six screens were static in week 7. The platform underneath them now exists:
+> Postgres, a session with role guards, and server actions, so the instructor
+> screens write to the database and stay written. The interface did not change —
+> it is generated from the prototype files, so the design that was reviewed cannot
+> drift."
+
+Two things to watch for while someone else drives:
+
+- **Overclaiming.** The most likely sentence on the day is "our AI generates the
+  course". It does not, yet. §5 of the handout is the correction, and it is easier
+  to say it first than to walk it back.
+- **A dead button being clicked.** If a control on the studio, learner, path or
+  analytics screen is pressed and nothing happens, the honest line is "that screen
+  is still the prototype; the behaviour lands in week 10" — and it should be said
+  immediately, not after a second attempt.
+
 
 ## B. Questions likely to come up
 
