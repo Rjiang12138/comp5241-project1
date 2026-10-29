@@ -53,8 +53,9 @@ coverage/
 .neon
 .neon
 
-# Week 9 meeting material. The handout PDF is the deliverable; the print source
-# and the personal Q&A notes are working files and stay on the machine.
+# Week 9 meeting material. The handout was a one-off; it is not project
+# documentation and does not belong in the repository. The files stay on disk.
 docs/week9-briefing.html
 docs/week9-briefing.md
+docs/week9-briefing.pdf
 docs/week9-qa-zh.md
