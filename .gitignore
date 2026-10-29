@@ -52,3 +52,9 @@ coverage/
 # Neon CLI link state (project and branch ids; neon.ts is the committed policy)
 .neon
 .neon
+
+# Week 9 meeting material. The handout PDF is the deliverable; the print source
+# and the personal Q&A notes are working files and stay on the machine.
+docs/week9-briefing.html
+docs/week9-briefing.md
+docs/week9-qa-zh.md
