@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import {
   addActivity,
   addModule,
+  importRoster,
   moveModule,
   publishCourse,
   removeActivity,
@@ -102,6 +103,37 @@ export async function publishCourseAction(formData: FormData): Promise<void> {
   const courseId = str(formData, "courseId");
   await publishCourse(courseId);
   refresh(courseId);
+}
+
+/**
+ * Roster import.
+ *
+ * The admin screen has promised "students import themselves from a Moodle
+ * roster or CSV" since the first week; this is the control that makes that
+ * sentence true. The parser is deliberately forgiving — one line per person,
+ * `name,email` or just `email` — because a roster export is a file somebody else
+ * produced, and rejecting it on a trailing comma is how a feature gets a
+ * reputation for being fussy.
+ */
+export async function importRosterAction(formData: FormData): Promise<void> {
+  const courseId = str(formData, "courseId");
+  const raw = str(formData, "roster");
+
+  const rows: Array<{ name: string; email: string }> = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.toLowerCase() === "name,email") continue;
+    const [first, second] = trimmed.split(",").map((part) => part.trim());
+    const email = (second ?? first ?? "").toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) continue;
+    const name = second ? first : email.split("@")[0];
+    rows.push({ name: name || email.split("@")[0], email });
+  }
+
+  const added = await importRoster(courseId, rows);
+  refresh(courseId);
+  revalidatePath("/admin");
+  redirect(`/courses/${courseId}?roster=${added}`);
 }
 
 export async function openCourseAction(formData: FormData): Promise<void> {

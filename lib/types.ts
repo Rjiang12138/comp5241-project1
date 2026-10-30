@@ -65,6 +65,10 @@ export interface Activity {
   title: string;
   format: ActivityFormat;
   minutes: number;
+  /** Format-specific content: reading blocks, quiz questions, lab starter. */
+  payload?: unknown;
+  /** Grading criteria for peer review and role play. */
+  rubric?: unknown;
 }
 
 export interface Cohort {

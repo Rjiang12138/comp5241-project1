@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role, User } from "./types";
-import { listStaff } from "./store";
+import { listSignableUsers } from "./store";
 
 /**
  * Session handling.
@@ -46,16 +46,20 @@ function toSession(user: User): Session {
 
 /** The demo roster the sign-in page offers. */
 export async function switchableUsers(): Promise<Session[]> {
-  return (await listStaff()).map(toSession);
+  return (await listSignableUsers()).map(toSession);
 }
 
 export async function getSession(): Promise<Session> {
   const jar = await cookies();
   const uid = jar.get(COOKIE)?.value;
-  const staff = await listStaff();
-  const fallback = staff.find((u) => u.id === DEMO_INSTRUCTOR) ?? staff[0];
+  // Every role is resolvable, learners included: `/learn` is only honest if the
+  // session behind it can actually be a learner. The default is still the
+  // instructor the prototype was drawn around, so a reviewer who opens the app
+  // cold lands in the staff shell.
+  const users = await listSignableUsers();
+  const fallback = users.find((u) => u.id === DEMO_INSTRUCTOR) ?? users[0];
   if (!uid) return toSession(fallback);
-  const match = staff.find((u) => u.id === uid);
+  const match = users.find((u) => u.id === uid);
   return toSession(match ?? fallback);
 }
 

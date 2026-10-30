@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./additions.css";
-import PrototypeScripts from "@/components/PrototypeScripts";
 
 export const metadata: Metadata = {
   title: "Praxis — AI course studio for software engineering",
@@ -14,7 +13,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         {children}
-        <PrototypeScripts />
       </body>
     </html>
   );

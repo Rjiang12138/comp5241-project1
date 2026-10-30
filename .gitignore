@@ -44,6 +44,18 @@ test-results/
 playwright-report/
 coverage/
 
+# Local browser probes and one-off scripts. These drive Chrome over the DevTools
+# Protocol to produce the census in docs/test-plan.md §8.2 and the event counts in
+# §8.5–§8.8. They are how the evidence was collected, not part of the product.
+.probe.mjs
+.drive.mjs
+.census.mjs
+.events.mts
+.events.mjs
+.cleanup.mjs
+.pathcheck.mjs
+.shot-*.png
+
 # Local store written by lib/store.ts
 .data/
 .shots/

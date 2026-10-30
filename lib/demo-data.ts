@@ -210,25 +210,126 @@ export type SeedSummary = {
   modules: number;
   activities: number;
   enrolments: number;
+  events: number;
 };
 
 /**
- * Delete every row and re-insert the fixture.
+ * The event log, generated rather than invented.
  *
- * Takes the client as an argument rather than importing the singleton so the
- * CLI can hand it its own connection and the server action can hand it the
- * pooled one.
+ * `events` is append-only and every number on /insights is derived from it, so
+ * the fixture has to contain a plausible log or the analytics screen has
+ * nothing to show but zeros. This produces a cohort that is mid-course: a few
+ * learners finished, most are around the code lab, one never started — which is
+ * the shape the prototype's copy describes.
  *
- * This is a *data* reset, not a schema reset: it never drops tables. That is
- * deliberate — a button in a web page has no business running DDL.
- *
- * Everything runs in one batched transaction. The first version awaited each
- * statement in turn, which cost one network round trip per statement: against
- * a database in another region that came to ~15 seconds, long enough that the
- * button looked hung. The deletes are now a single TRUNCATE — ten separate
- * `deleteMany` calls were ten round trips to clear tables that all have to be
- * cleared anyway — and the inserts ride along in the same transaction.
+ * Dates are relative to *now*, not to a fixed term start. Anchoring them to
+ * 2026-09-14 looked correct in September and read as "0% active this week" by
+ * the end of October, because a fixture that stops moving makes a live
+ * dashboard look broken. Each learner finishes their last activity a few days
+ * ago, and the ones who stalled stall further back — which is exactly what the
+ * nudge list is supposed to surface.
  */
+const C_SEF_ACTIVITIES = ["a-1-1", "a-2-1", "a-3-1", "a-3-2", "a-3-3", "a-4-1", "a-5-1"];
+
+// How many of the seven each of the 24 learners has finished, in fixture order.
+const COMPLETION: number[] = [7, 6, 5, 7, 4, 6, 3, 5, 2, 4, 6, 3, 0, 5, 4, 2, 6, 5, 3, 4, 1, 5, 2, 3];
+
+const DAY = 24 * 60 * 60 * 1000;
+
+function buildEvents(learners: LearnerRow[]): Prisma.EventCreateManyInput[] {
+  const rows: Prisma.EventCreateManyInput[] = [];
+  const now = Date.now();
+  let serial = 0;
+
+  /** `daysAgo` before now, at a given hour of that day. */
+  const at = (daysAgo: number, hour: number): Date => {
+    const day = new Date(now - Math.max(0, daysAgo) * DAY);
+    day.setHours(hour, (serial * 7) % 60, 0, 0);
+    return day;
+  };
+
+  learners.forEach((learner, index) => {
+    const enrollmentId = `e-${index + 1}`;
+    const done = COMPLETION[index] ?? 0;
+    if (done === 0) return;
+
+    // The last completed activity is 1–4 days ago for most learners, so "active
+    // this week" is a real number rather than a zero.
+    const pace = 4 + (index % 3);
+    const daysSinceLast = 1 + (index % 4);
+    const firstDaysAgo = daysSinceLast + (done - 1) * pace;
+
+    for (let step = 0; step < done; step += 1) {
+      const activityId = C_SEF_ACTIVITIES[step];
+      const daysAgo = firstDaysAgo - step * pace;
+
+      rows.push({
+        id: `ev-${(serial += 1)}`,
+        enrollmentId,
+        activityId,
+        type: "activity_started",
+        createdAt: at(daysAgo, 9),
+      });
+      rows.push({
+        id: `ev-${(serial += 1)}`,
+        enrollmentId,
+        activityId,
+        type: "activity_completed",
+        createdAt: at(daysAgo, 10),
+        payload: { minutes: 8 },
+      });
+    }
+
+    // Everyone who reaches the code lab and stops there has failed it at least
+    // twice — that is the finding the insight panel is allowed to state.
+    const nextStep = done;
+    if (nextStep < C_SEF_ACTIVITIES.length && C_SEF_ACTIVITIES[nextStep] === "a-3-2") {
+      const failedDaysAgo = Math.max(1, daysSinceLast - 1);
+      rows.push({
+        id: `ev-${(serial += 1)}`,
+        enrollmentId,
+        activityId: "a-3-2",
+        type: "activity_attempted",
+        createdAt: at(failedDaysAgo + 1, 10),
+        payload: { passed: 1, total: 3 },
+      });
+      rows.push({
+        id: `ev-${(serial += 1)}`,
+        enrollmentId,
+        activityId: "a-3-2",
+        type: "activity_attempted",
+        createdAt: at(failedDaysAgo, 11),
+        payload: { passed: 2, total: 3 },
+      });
+      if (index % 3 === 0) {
+        rows.push({
+          id: `ev-${(serial += 1)}`,
+          enrollmentId,
+          activityId: "a-3-2",
+          type: "hint_opened",
+          createdAt: at(failedDaysAgo, 12),
+        });
+      }
+    }
+
+    // Tutor questions scale with how far the learner got, which is what the
+    // "62% answered from course material" claim was standing in for.
+    const questions = Math.min(6, Math.floor(done * 0.8));
+    for (let question = 0; question < questions; question += 1) {
+      rows.push({
+        id: `ev-${(serial += 1)}`,
+        enrollmentId,
+        activityId: C_SEF_ACTIVITIES[Math.min(question, done - 1)] ?? null,
+        type: "tutor_asked",
+        createdAt: at(firstDaysAgo - question * 2 + 1, 14),
+        payload: { grounded: question % 5 !== 0 },
+      });
+    }
+  });
+
+  return rows;
+}
+
 export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
   const learners = [...NAMED_LEARNERS, ...GENERATED_LEARNERS];
 
@@ -245,6 +346,8 @@ export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
     importedFrom: "moodle",
     createdAt: new Date("2026-09-20"),
   }));
+
+  const events = buildEvents(learners);
 
   await prisma.$transaction([
     // One statement instead of ten. CASCADE covers the foreign keys, and every
@@ -292,6 +395,10 @@ export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
     // cohort reads as the 24 the prototype describes. L02 exists but is empty:
     // a newly created class is exactly what the admin screen is for.
     prisma.enrollment.createMany({ data: enrolments }),
+
+    // The log the analytics screen reads. Without it /insights is a page of
+    // zeros, and a page of zeros is indistinguishable from a broken query.
+    prisma.event.createMany({ data: events }),
   ]);
 
   // Counted from what was inserted rather than re-queried: the transaction
@@ -304,5 +411,6 @@ export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
     modules: MODULES.length,
     activities: ACTIVITIES.length,
     enrolments: enrolments.length,
+    events: events.length,
   };
 }

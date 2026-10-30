@@ -1,9 +1,22 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { getSession, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { seedDemoData } from "@/lib/demo-data";
+
+/** Save the signed-in user's display name. */
+export async function saveProfileAction(formData: FormData): Promise<void> {
+  const session = await getSession();
+  const name = String(formData.get("name") ?? "").trim();
+  if (name.length < 2) redirect("/settings?profile=short");
+
+  await prisma.user.update({ where: { id: session.userId }, data: { name: name.slice(0, 60) } });
+  revalidatePath("/settings");
+  revalidatePath("/");
+  redirect("/settings?profile=saved");
+}
 
 /**
  * Restore the demo fixture — the button form of `npm run db:reset`.

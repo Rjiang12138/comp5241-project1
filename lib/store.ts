@@ -1,8 +1,10 @@
 import { prisma } from "./db";
+import type { Prisma } from "@prisma/client";
 import type { GeneratedOutline } from "./generate";
 import type {
   Activity,
   ActivityFormat,
+  Background,
   Cohort,
   Course,
   CourseView,
@@ -68,6 +70,33 @@ export async function getCourse(courseId: string): Promise<CourseView | null> {
       createdAt: dateOnly(version.createdAt),
     })),
   };
+}
+
+/** Published versions of a course, newest first, with the tree as it stood. */
+export async function courseVersions(courseId: string): Promise<
+  Array<{ id: string; version: number; note: string; createdAt: string; snapshot: unknown }>
+> {
+  const rows = await prisma.courseVersion.findMany({
+    where: { courseId },
+    orderBy: { version: "desc" },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    version: row.version,
+    note: row.note,
+    createdAt: dateOnly(row.createdAt),
+    snapshot: row.snapshot,
+  }));
+}
+
+/** The most recent course this instructor touched, for the studio's status pill. */
+export async function lastTouchedCourse(ownerId: string): Promise<{ id: string; title: string; status: string; updatedAt: Date } | null> {
+  const row = await prisma.course.findFirst({
+    where: { ownerId },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, title: true, status: true, updatedAt: true },
+  });
+  return row ?? null;
 }
 
 export async function courseMinutes(courseId: string): Promise<number> {
@@ -230,13 +259,43 @@ export async function removeActivity(activityId: string): Promise<void> {
 /** Publishing is a gate, not a toggle: it records a version row every time. */
 export async function publishCourse(courseId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    const current = await tx.course.findUnique({
+      where: { id: courseId },
+      select: {
+        title: true,
+        brief: true,
+        minutes: true,
+        audience: true,
+        modules: {
+          orderBy: { position: "asc" },
+          select: {
+            title: true,
+            objective: true,
+            activities: {
+              orderBy: { position: "asc" },
+              select: { title: true, format: true, minutes: true },
+            },
+          },
+        },
+      },
+    });
+
     const course = await tx.course.update({
       where: { id: courseId },
       data: { version: { increment: 1 }, status: "published" },
       select: { version: true },
     });
+
     await tx.courseVersion.create({
-      data: { courseId, version: course.version, note: "Published from the course editor" },
+      data: {
+        courseId,
+        version: course.version,
+        note: "Published from the course editor",
+        // The tree as it stood at publish time. Without it "compare v3 → v4"
+        // could only compare two sentences the instructor wrote about the
+        // change, which is a note, not a diff.
+        snapshot: current ? (current as unknown as Prisma.InputJsonValue) : undefined,
+      },
     });
   });
 }
@@ -332,4 +391,788 @@ export async function createCourseFromOutline(input: {
 
     return course.id;
   });
+}
+
+/* --------------------------------------------------------------- learner */
+
+/** Event types written by the player. Kept as strings so the log can grow. */
+export type EventType =
+  | "activity_started"
+  | "activity_completed"
+  | "activity_attempted"
+  | "hint_opened"
+  | "tutor_asked"
+  | "nudge_sent";
+
+export type LearnerCourse = { id: string; title: string; minutes: number };
+
+export type LearnerView = {
+  learner: User;
+  enrollmentId: string;
+  course: Course & { modules: Array<Module & { activities: Activity[] }> };
+  /** Activity ids this learner has finished, oldest first. */
+  completed: string[];
+  /** Attempts per activity id, counted from the event log. */
+  attempts: Record<string, number>;
+  /** Where to resume: first unfinished activity, or the last one. */
+  currentActivityId: string | null;
+  totalActivities: number;
+  totalMinutes: number;
+  courses: LearnerCourse[];
+  lastActiveAt: Date | null;
+};
+
+/**
+ * Everything the player needs, in one round trip per table.
+ *
+ * Progress is derived from `events`, never stored on the enrolment: the log is
+ * the source of truth and a denormalised counter would be a second one that
+ * can disagree with it.
+ */
+export async function getLearnerView(userId: string, courseId?: string): Promise<LearnerView | null> {
+  const enrolments = await prisma.enrollment.findMany({
+    where: { userId },
+    include: { course: { select: { id: true, title: true, minutes: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (enrolments.length === 0) return null;
+
+  const chosen = (courseId ? enrolments.find((row) => row.courseId === courseId) : undefined) ?? enrolments[0];
+
+  const [learner, course, events] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    prisma.course.findUnique({
+      where: { id: chosen.courseId },
+      include: {
+        modules: {
+          orderBy: { position: "asc" },
+          include: { activities: { orderBy: { position: "asc" } } },
+        },
+      },
+    }),
+    prisma.event.findMany({
+      where: { enrollmentId: chosen.id },
+      orderBy: { createdAt: "asc" },
+      select: { activityId: true, type: true, createdAt: true },
+    }),
+  ]);
+
+  if (!learner || !course) return null;
+
+  const completed: string[] = [];
+  const attempts: Record<string, number> = {};
+  for (const event of events) {
+    if (!event.activityId) continue;
+    if (event.type === "activity_completed" && !completed.includes(event.activityId)) {
+      completed.push(event.activityId);
+    }
+    if (event.type === "activity_attempted") {
+      attempts[event.activityId] = (attempts[event.activityId] ?? 0) + 1;
+    }
+  }
+
+  const ordered = course.modules.flatMap((module) => module.activities.map((activity) => activity.id));
+  const currentActivityId = ordered.find((id) => !completed.includes(id)) ?? ordered[ordered.length - 1] ?? null;
+
+  return {
+    learner,
+    enrollmentId: chosen.id,
+    course,
+    completed,
+    attempts,
+    currentActivityId,
+    totalActivities: ordered.length,
+    totalMinutes: course.modules.reduce(
+      (sum, module) => sum + module.activities.reduce((inner, activity) => inner + activity.minutes, 0),
+      0,
+    ),
+    courses: enrolments.map((row) => ({ id: row.course.id, title: row.course.title, minutes: row.course.minutes })),
+    lastActiveAt: events.length > 0 ? events[events.length - 1].createdAt : null,
+  };
+}
+
+/** Append one row to the event log. Nothing in the app ever updates one. */
+export async function recordEvent(input: {
+  enrollmentId: string;
+  activityId: string | null;
+  type: EventType;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  await prisma.event.create({
+    data: {
+      enrollmentId: input.enrollmentId,
+      activityId: input.activityId,
+      type: input.type,
+      payload: (input.payload ?? undefined) as Prisma.InputJsonValue | undefined,
+    },
+  });
+}
+
+/**
+ * Log that an activity was opened.
+ *
+ * Idempotent on purpose: the player is a page, and pages get reloaded, shared
+ * and re-entered from the browser history. Writing a `started` row per request
+ * would inflate the denominator of every "time on task" figure in /insights and
+ * make a learner who refreshed three times look like three learners. One row per
+ * (enrolment, activity) is the fact worth keeping: this person did open it.
+ */
+export async function recordStart(enrollmentId: string, activityId: string): Promise<void> {
+  const existing = await prisma.event.findFirst({
+    where: { enrollmentId, activityId, type: "activity_started" },
+    select: { id: true },
+  });
+  if (existing) return;
+  await recordEvent({ enrollmentId, activityId, type: "activity_started" });
+}
+
+/**
+ * Enrol a learner in a course.
+ *
+ * `Enrollment.cohortId` is required by the schema because a cohort is who the
+ * instructor reports on. A self-directed learner has no cohort, so they join
+ * the course's own cohort when it has one and the earliest cohort otherwise —
+ * a real product would have a "self-paced" cohort, and that is the change to
+ * make here rather than loosening the constraint.
+ */
+export async function enrollLearner(userId: string, courseId: string): Promise<void> {
+  const existing = await prisma.enrollment.findUnique({ where: { courseId_userId: { courseId, userId } } });
+  if (existing) return;
+
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { cohortId: true } });
+  const cohortId =
+    course?.cohortId ?? (await prisma.cohort.findFirst({ orderBy: { code: "asc" }, select: { id: true } }))?.id;
+  if (!cohortId) throw new Error("No cohort exists to enrol into");
+
+  await prisma.enrollment.create({ data: { courseId, userId, cohortId, importedFrom: "manual" } });
+}
+
+/**
+ * Add a list of people to a course, creating the ones who do not exist yet.
+ *
+ * Returns how many enrolments were created, which is the only number worth
+ * showing: "12 added, 3 already enrolled" is a result, "import complete" is not.
+ * `importedFrom` is set to `csv` so the roster table can say where a row came
+ * from later.
+ */
+export async function importRoster(courseId: string, rows: Array<{ name: string; email: string }>): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { cohortId: true } });
+  const cohortId =
+    course?.cohortId ?? (await prisma.cohort.findFirst({ orderBy: { code: "asc" }, select: { id: true } }))?.id;
+  if (!cohortId) return 0;
+
+  let added = 0;
+  for (const row of rows) {
+    const user = await prisma.user.upsert({
+      where: { email: row.email },
+      update: {},
+      create: { name: row.name, email: row.email, role: "learner", background: "non_cs" },
+      select: { id: true },
+    });
+
+    const existing = await prisma.enrollment.findUnique({
+      where: { courseId_userId: { courseId, userId: user.id } },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    await prisma.enrollment.create({
+      data: { courseId, userId: user.id, cohortId, importedFrom: "csv" },
+    });
+    added += 1;
+  }
+
+  return added;
+}
+
+/** Published courses a learner could join. */
+export async function listPublishedCourses(): Promise<Array<{ id: string; title: string; minutes: number; modules: number }>> {
+  const rows = await prisma.course.findMany({
+    where: { status: "published" },
+    orderBy: { title: "asc" },
+    include: { _count: { select: { modules: true } } },
+  });
+  return rows.map((row) => ({ id: row.id, title: row.title, minutes: row.minutes, modules: row._count.modules }));
+}
+
+/* ------------------------------------------------------------- analytics */
+
+export type WeeklyPoint = { label: string; value: number };
+
+export type FormatCompletion = { format: ActivityFormat; label: string; pct: number; attempts: number };
+
+export type NudgeRow = {
+  userId: string;
+  name: string;
+  background: Background;
+  completed: number;
+  total: number;
+  lastActive: Date | null;
+  signal: string;
+  tone: "rose" | "amber";
+};
+
+export type CourseAnalytics = {
+  learners: number;
+  activeThisWeek: number;
+  /** Share of the cohort who finished every activity. */
+  completionRate: number;
+  /** Mean per-learner progress. The headline number, because 8% "finished
+   *  everything" is true but reads as broken when the cohort is mid-course. */
+  averageProgress: number;
+  finishedAll: number;
+  medianAttempts: number;
+  tutorQuestions: number;
+  weekly: WeeklyPoint[];
+  byFormat: FormatCompletion[];
+  insight: { headline: string; body: string; activityTitle: string | null } | null;
+  nudge: NudgeRow[];
+  rangeDays: number | null;
+};
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+/**
+ * Everything /insights shows, computed from the event log.
+ *
+ * Nothing here is a stored counter. If the numbers look wrong, the events are
+ * wrong, and there is exactly one place to look — which is the property that
+ * makes an analytics screen worth trusting.
+ */
+export async function courseAnalytics(courseId: string, rangeDays: number | null): Promise<CourseAnalytics> {
+  const [enrolments, activities] = await Promise.all([
+    prisma.enrollment.findMany({
+      where: { courseId },
+      include: { user: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.activity.findMany({
+      where: { module: { courseId } },
+      orderBy: [{ module: { position: "asc" } }, { position: "asc" }],
+      select: { id: true, title: true, format: true, module: { select: { position: true } } },
+    }),
+  ]);
+
+  const enrollmentIds = enrolments.map((row) => row.id);
+  const since = rangeDays ? new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000) : null;
+
+  /**
+   * One read of everything, then two views of it.
+   *
+   * Progress is a state — "Mei has finished 7 of 7" — and a state does not reset
+   * because the instructor picked "last 7 days". Attempts and tutor questions are
+   * events, and those do belong to the window. Reading only windowed rows made
+   * the 7-day view claim "0 of 24 finished every activity", which is false about
+   * the learners and reads as a regression that never happened.
+   */
+  const allEvents = await prisma.event.findMany({
+    where: { enrollmentId: { in: enrollmentIds } },
+    orderBy: { createdAt: "asc" },
+    select: { enrollmentId: true, activityId: true, type: true, createdAt: true },
+  });
+  const events = since ? allEvents.filter((event) => event.createdAt >= since) : allEvents;
+
+  const completedByEnrolment = new Map<string, Set<string>>();
+  // Keyed by enrolment + activity: a median over the whole course would count
+  // one learner retrying eight times as eight different attempts.
+  const attemptsPerActivity = new Map<string, number>();
+  const lastActive = new Map<string, Date>();
+  const attemptEventsByActivity = new Map<string, number>();
+  let tutorQuestions = 0;
+
+  for (const event of allEvents) {
+    if (event.type === "activity_completed" && event.activityId) {
+      const set = completedByEnrolment.get(event.enrollmentId) ?? new Set<string>();
+      set.add(event.activityId);
+      completedByEnrolment.set(event.enrollmentId, set);
+    }
+
+    // Last-seen is a property of the person, not of the selected range.
+    const previous = lastActive.get(event.enrollmentId);
+    if (!previous || event.createdAt > previous) lastActive.set(event.enrollmentId, event.createdAt);
+  }
+
+  for (const event of events) {
+    if (event.type === "activity_attempted" && event.activityId) {
+      const key = `${event.enrollmentId}:${event.activityId}`;
+      attemptsPerActivity.set(key, (attemptsPerActivity.get(key) ?? 0) + 1);
+      attemptEventsByActivity.set(event.activityId, (attemptEventsByActivity.get(event.activityId) ?? 0) + 1);
+    }
+    if (event.type === "tutor_asked") tutorQuestions += 1;
+  }
+
+  const total = activities.length;
+  const finished = [...completedByEnrolment.values()].filter((set) => set.size >= total && total > 0).length;
+  const progressSum = enrolments.reduce(
+    (sum, enrolment) => sum + Math.min(total, completedByEnrolment.get(enrolment.id)?.size ?? 0),
+    0,
+  );
+  const averageProgress = enrolments.length === 0 || total === 0 ? 0 : Math.round((progressSum / (enrolments.length * total)) * 100);
+
+  // Eight weekly buckets ending this week, so the chart has a fixed shape
+  // whether or not the range filter is set to 7 days.
+  const now = Date.now();
+  const weekly: WeeklyPoint[] = [];
+  for (let index = 7; index >= 0; index -= 1) {
+    const end = now - index * WEEK_MS;
+    const start = end - WEEK_MS;
+    const active = new Set(
+      events
+        .filter((event) => {
+          const time = event.createdAt.getTime();
+          return time > start && time <= end;
+        })
+        .map((event) => event.enrollmentId),
+    );
+    weekly.push({
+      label: `W${8 - index}`,
+      value: enrolments.length === 0 ? 0 : Math.round((active.size / enrolments.length) * 100),
+    });
+  }
+
+  const formatLabels: Record<string, string> = {
+    reading: "Reading",
+    quiz: "Quiz",
+    role_play: "Role play",
+    code_lab: "Code lab",
+    simulation: "Simulation",
+    peer_review: "Peer review",
+    game: "Mini-game",
+    narrated_slides: "Narrated slides",
+  };
+
+  const byFormat: FormatCompletion[] = [];
+  for (const [format, label] of Object.entries(formatLabels)) {
+    const inFormat = activities.filter((activity) => activity.format === format);
+    if (inFormat.length === 0) continue;
+    let done = 0;
+    let possible = 0;
+    for (const enrolment of enrolments) {
+      const set = completedByEnrolment.get(enrolment.id);
+      for (const activity of inFormat) {
+        possible += 1;
+        if (set?.has(activity.id)) done += 1;
+      }
+    }
+    const attempts = inFormat.reduce((sum, activity) => sum + (attemptEventsByActivity.get(activity.id) ?? 0), 0);
+    byFormat.push({
+      format: format as ActivityFormat,
+      label,
+      pct: possible === 0 ? 0 : Math.round((done / possible) * 100),
+      attempts,
+    });
+  }
+  byFormat.sort((a, b) => b.pct - a.pct);
+
+  // The nudge list: least progress first, then longest idle.
+  const nudge: NudgeRow[] = enrolments
+    .map((enrolment) => {
+      const set = completedByEnrolment.get(enrolment.id) ?? new Set<string>();
+      const last = lastActive.get(enrolment.id) ?? null;
+      const idleDays = last ? Math.floor((now - last.getTime()) / (24 * 60 * 60 * 1000)) : null;
+      const stuck = activities.find(
+        (activity) => !set.has(activity.id) && (attemptsPerActivity.get(`${enrolment.id}:${activity.id}`) ?? 0) >= 2,
+      );
+
+      let signal = "No activity yet";
+      let tone: "rose" | "amber" = "rose";
+      if (stuck) {
+        signal = `Stuck on ${stuck.title.slice(0, 28)}`;
+        tone = "rose";
+      } else if (idleDays !== null && idleDays >= 3) {
+        signal = `Idle ${idleDays} days`;
+        tone = "amber";
+      } else if (set.size > 0) {
+        signal = `${set.size} of ${total} done`;
+        tone = "amber";
+      }
+
+      return {
+        userId: enrolment.userId,
+        name: enrolment.user.name,
+        background: enrolment.user.background,
+        completed: set.size,
+        total,
+        lastActive: last,
+        signal,
+        tone,
+      };
+    })
+    .filter((row) => row.completed < total)
+    .sort((a, b) => a.completed - b.completed || (a.lastActive?.getTime() ?? 0) - (b.lastActive?.getTime() ?? 0))
+    .slice(0, 5);
+
+  // One insight, stated only when the numbers support it — and attributed to
+  // the right cause. A format that only appears in the final module will always
+  // look weak; that is position, not difficulty, and saying "quizzes are hard"
+  // would be a confident wrong answer.
+  const weakest = byFormat.length > 0 ? byFormat[byFormat.length - 1] : null;
+  const strongest = byFormat.length > 0 ? byFormat[0] : null;
+  const moduleCount = Math.max(1, ...activities.map((activity) => activity.module.position));
+  const weakestRows = weakest ? activities.filter((activity) => activity.format === weakest.format) : [];
+  const weakestPosition = weakestRows.length
+    ? weakestRows.reduce((sum, activity) => sum + activity.module.position, 0) / weakestRows.length
+    : 0;
+  const lateInCourse = weakestRows.length > 0 && weakestPosition > moduleCount - 1.5;
+
+  const insight =
+    weakest && strongest && strongest.pct - weakest.pct >= 10
+      ? lateInCourse
+        ? {
+            headline: `Learners stop before module ${Math.round(weakestPosition)}`,
+            body: `${weakest.label} activities finish ${weakest.pct}% of the time, ${strongest.pct - weakest.pct} points below ${strongest.label} — but every ${weakest.label.toLowerCase()} in this course sits in module ${Math.round(weakestPosition)} of ${moduleCount}. The drop is attrition, not difficulty. The change worth making is at the end of the previous module: a checkpoint that tells a learner what they are about to unlock, rather than another attempt at the last activity.`,
+            activityTitle: weakestRows[0]?.title ?? null,
+          }
+        : {
+            headline: `${weakest.label} finishes ${strongest.pct - weakest.pct} points below ${strongest.label}`,
+            body: `Learners complete ${strongest.label.toLowerCase()} activities ${strongest.pct}% of the time and ${weakest.label.toLowerCase()} activities ${weakest.pct}% of the time, and the two are spread across the same modules — so this is the format, not the position. Consider a worked example before the first ${weakest.label.toLowerCase()}, and move the first hint from on-request to after one failure.`,
+            activityTitle: weakestRows[0]?.title ?? null,
+          }
+      : null;
+
+  return {
+    learners: enrolments.length,
+    activeThisWeek: weekly[weekly.length - 1]?.value ?? 0,
+    completionRate: enrolments.length === 0 ? 0 : Math.round((finished / enrolments.length) * 100),
+    averageProgress,
+    finishedAll: finished,
+    medianAttempts: Math.round(median([...attemptsPerActivity.values()]) * 10) / 10,
+    tutorQuestions,
+    weekly,
+    byFormat,
+    insight,
+    nudge,
+    rangeDays,
+  };
+}
+
+export type LearnerProgressRow = {
+  userId: string;
+  name: string;
+  email: string;
+  background: "cs" | "non_cs";
+  completed: number;
+  total: number;
+  minutesDone: number;
+  lastActive: Date | null;
+  idleDays: number | null;
+  stuckOn: string | null;
+  signal: string;
+  tone: "teal" | "amber" | "rose";
+};
+
+/**
+ * One row per enrolled learner, computed from the event log.
+ *
+ * The course editor's cohort table used to be a fixture keyed by user id — the
+ * same four numbers for every course, regardless of who had actually done what.
+ * This is the query that replaces it, so the table on the editor and the table
+ * on /insights cannot disagree.
+ */
+export async function learnerProgress(courseId: string): Promise<LearnerProgressRow[]> {
+  const [enrolments, activities, events] = await Promise.all([
+    prisma.enrollment.findMany({ where: { courseId }, include: { user: true }, orderBy: { createdAt: "asc" } }),
+    prisma.activity.findMany({
+      where: { module: { courseId } },
+      select: { id: true, title: true, minutes: true },
+    }),
+    prisma.event.findMany({
+      where: { enrollment: { courseId } },
+      select: { enrollmentId: true, activityId: true, type: true, createdAt: true },
+    }),
+  ]);
+
+  const minutesOf = new Map(activities.map((activity) => [activity.id, activity.minutes]));
+  const titleOf = new Map(activities.map((activity) => [activity.id, activity.title]));
+  const done = new Map<string, Set<string>>();
+  const attempts = new Map<string, number>();
+  const lastActive = new Map<string, Date>();
+
+  for (const event of events) {
+    if (event.type === "activity_completed" && event.activityId) {
+      const set = done.get(event.enrollmentId) ?? new Set<string>();
+      set.add(event.activityId);
+      done.set(event.enrollmentId, set);
+    }
+    if (event.type === "activity_attempted" && event.activityId) {
+      const key = `${event.enrollmentId}:${event.activityId}`;
+      attempts.set(key, (attempts.get(key) ?? 0) + 1);
+    }
+    const previous = lastActive.get(event.enrollmentId);
+    if (!previous || event.createdAt > previous) lastActive.set(event.enrollmentId, event.createdAt);
+  }
+
+  const total = activities.length;
+  const now = Date.now();
+
+  return enrolments.map((enrolment) => {
+    const set = done.get(enrolment.id) ?? new Set<string>();
+    const last = lastActive.get(enrolment.id) ?? null;
+    const idleDays = last ? Math.floor((now - last.getTime()) / (24 * 60 * 60 * 1000)) : null;
+    const stuck = activities.find(
+      (activity) => !set.has(activity.id) && (attempts.get(`${enrolment.id}:${activity.id}`) ?? 0) >= 2,
+    );
+
+    let signal = "No activity yet";
+    let tone: LearnerProgressRow["tone"] = "rose";
+    if (total > 0 && set.size >= total) {
+      signal = "Finished";
+      tone = "teal";
+    } else if (stuck) {
+      signal = `Stuck on ${titleOf.get(stuck.id)?.slice(0, 26) ?? "an activity"}`;
+      tone = "rose";
+    } else if (idleDays !== null && idleDays >= 3) {
+      signal = `Idle ${idleDays} days`;
+      tone = "amber";
+    } else if (set.size > 0) {
+      signal = idleDays === 0 ? "Active today" : `Active ${idleDays ?? 0}d ago`;
+      tone = "teal";
+    }
+
+    return {
+      userId: enrolment.userId,
+      name: enrolment.user.name,
+      email: enrolment.user.email,
+      background: enrolment.user.background,
+      completed: set.size,
+      total,
+      minutesDone: [...set].reduce((sum, id) => sum + (minutesOf.get(id) ?? 0), 0),
+      lastActive: last,
+      idleDays,
+      stuckOn: stuck ? titleOf.get(stuck.id) ?? null : null,
+      signal,
+      tone,
+    };
+  });
+}
+
+/** Record that an instructor asked a learner to come back. */
+export async function nudgeLearner(courseId: string, userId: string): Promise<void> {
+  const enrollment = await prisma.enrollment.findUnique({
+    where: { courseId_userId: { courseId, userId } },
+    select: { id: true },
+  });
+  if (!enrollment) return;
+  await recordEvent({ enrollmentId: enrollment.id, activityId: null, type: "nudge_sent" });
+}
+
+/* ------------------------------------------------------------------ paths */
+
+export type PathStepView = {
+  id: string;
+  position: number;
+  title: string;
+  detail: string;
+  minutes: number;
+  status: string;
+  courseId: string | null;
+  courseTitle: string | null;
+};
+
+export type PathView = {
+  id: string;
+  goal: string;
+  domain: string;
+  level: string;
+  hoursPerWeek: number;
+  weeks: number;
+  model: string;
+  createdAt: Date;
+  steps: PathStepView[];
+};
+
+export async function getLatestPath(userId: string): Promise<PathView | null> {
+  const row = await prisma.learningPath.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    include: { steps: { orderBy: { position: "asc" }, include: { course: { select: { title: true } } } } },
+  });
+  if (!row) return null;
+  return {
+    ...row,
+    steps: row.steps.map((step) => ({
+      id: step.id,
+      position: step.position,
+      title: step.title,
+      detail: step.detail,
+      minutes: step.minutes,
+      status: step.status,
+      courseId: step.courseId,
+      courseTitle: step.course?.title ?? null,
+    })),
+  };
+}
+
+export async function savePath(input: {
+  userId: string;
+  goal: string;
+  domain: string;
+  level: string;
+  hoursPerWeek: number;
+  weeks: number;
+  model: string;
+  steps: Array<{ title: string; detail: string; minutes: number; courseId: string | null }>;
+}): Promise<string> {
+  return prisma.$transaction(async (tx) => {
+    const path = await tx.learningPath.create({
+      data: {
+        userId: input.userId,
+        goal: input.goal,
+        domain: input.domain,
+        level: input.level,
+        hoursPerWeek: input.hoursPerWeek,
+        weeks: input.weeks,
+        model: input.model,
+      },
+      select: { id: true },
+    });
+
+    for (const [index, step] of input.steps.entries()) {
+      await tx.pathStep.create({
+        data: {
+          pathId: path.id,
+          position: index + 1,
+          title: step.title,
+          detail: step.detail,
+          minutes: step.minutes,
+          courseId: step.courseId,
+        },
+      });
+    }
+
+    return path.id;
+  });
+}
+
+export async function setPathStepStatus(stepId: string, status: string): Promise<void> {
+  await prisma.pathStep.update({ where: { id: stepId }, data: { status } });
+}
+
+/** The library a path can draw on: published courses with their shape. */
+export async function pathLibrary(): Promise<
+  Array<{ id: string; title: string; brief: string; audience: string; minutes: number; modules: number; activities: number }>
+> {
+  const rows = await prisma.course.findMany({
+    where: { status: "published" },
+    orderBy: { minutes: "asc" },
+    include: { modules: { select: { id: true, activities: { select: { id: true } } } } },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    brief: row.brief,
+    audience: row.audience,
+    minutes: row.minutes,
+    modules: row.modules.length,
+    activities: row.modules.reduce((sum, module) => sum + module.activities.length, 0),
+  }));
+}
+
+/**
+ * Who the sign-in page offers.
+ *
+ * Three instructors/admins and three learners, not all 24: the point of the
+ * picker is to show that the three roles get different shells, and a list of
+ * 27 names demonstrates that worse than a list of 6.
+ */
+export async function listSignableUsers(): Promise<User[]> {
+  const staff = await prisma.user.findMany({
+    where: { role: { in: ["instructor", "admin"] } },
+    orderBy: [{ role: "asc" }, { name: "asc" }],
+  });
+  const learners = await prisma.user.findMany({
+    where: { id: { in: ["u-mei", "u-arjun", "u-sara"] } },
+    orderBy: { name: "asc" },
+  });
+  return [...staff, ...learners];
+}
+
+/**
+ * Which learner an instructor's "preview as learner" lands on.
+ *
+ * The first enrolment of the course, in fixture order, so the preview is stable
+ * between visits. A real product would let the instructor pick; that is a
+ * dropdown, not a data-model change.
+ */
+/** Cookie that pins which learner an instructor is previewing as. */
+export const PREVIEW_COOKIE = "praxis_preview";
+
+export async function previewLearner(courseId?: string, pinnedId?: string): Promise<string | null> {
+  const enrolments = await prisma.enrollment.findMany({
+    where: courseId ? { courseId } : {},
+    orderBy: { createdAt: "asc" },
+    select: { id: true, userId: true },
+  });
+  if (enrolments.length === 0) return null;
+
+  // A pinned learner wins. Without the pin, previewing is unstable in a way that
+  // looks like a bug: the pick below is "closest to halfway", so the moment the
+  // instructor completes an activity as that learner the numbers change and the
+  // next request hands them somebody else. The banner is supposed to read
+  // "Previewing as Omar", not reshuffle on every save.
+  if (pinnedId && enrolments.some((row) => row.userId === pinnedId)) return pinnedId;
+
+  // Prefer a learner who is roughly halfway: previewing someone who finished
+  // everything shows a screen full of ticks and none of the states the player
+  // exists to demonstrate.
+  const total = courseId ? await prisma.activity.count({ where: { module: { courseId } } }) : 0;
+  const counts = await prisma.event.groupBy({
+    by: ["enrollmentId"],
+    where: { enrollmentId: { in: enrolments.map((row) => row.id) }, type: "activity_completed" },
+    _count: { _all: true },
+  });
+  const done = new Map(counts.map((row) => [row.enrollmentId, row._count._all]));
+
+  const target = total / 2;
+  let best = enrolments[0];
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const enrolment of enrolments) {
+    const count = done.get(enrolment.id) ?? 0;
+    if (count === 0 || (total > 0 && count >= total)) continue;
+    const distance = Math.abs(count - target);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = enrolment;
+    }
+  }
+  return best.userId;
+}
+
+/** The next enrolled learner in a course, for the "preview as someone else" control. */
+export async function nextPreviewLearner(courseId: string, currentId: string): Promise<string | null> {
+  const enrolments = await prisma.enrollment.findMany({
+    where: { courseId },
+    orderBy: { userId: "asc" },
+    select: { userId: true },
+  });
+  if (enrolments.length === 0) return null;
+  const index = enrolments.findIndex((row) => row.userId === currentId);
+  if (index === -1) return enrolments[0].userId;
+  return enrolments[(index + 1) % enrolments.length].userId;
+}
+
+/**
+ * The course an analytics screen should open on.
+ *
+ * Not the first row by title: "Product thinking for engineers" sorts first and
+ * has no learners, so an instructor opening /insights cold would be shown a page
+ * of zeros and conclude the feature was broken. The busiest course is the one
+ * with something to say.
+ */
+export async function courseWithMostLearners(): Promise<string | null> {
+  const rows = await prisma.course.findMany({
+    select: { id: true, _count: { select: { enrollments: true } } },
+    orderBy: { enrollments: { _count: "desc" } },
+    take: 1,
+  });
+  return rows[0]?.id ?? null;
 }

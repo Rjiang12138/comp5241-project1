@@ -13,7 +13,15 @@ import StudioWorkspace from "@/components/StudioWorkspace";
 import { cohortsHref } from "@/lib/nav";
 import type { Session } from "@/lib/auth";
 
-export default function Studio({ session, model }: { session: Session; model: string }) {
+export default function Studio({
+  session,
+  model,
+  draft,
+}: {
+  session: Session;
+  model: string;
+  draft: { id: string; title: string; status: string; when: string } | null;
+}) {
   return (
     <>
       <div className="shell">
@@ -73,9 +81,21 @@ export default function Studio({ session, model }: { session: Session; model: st
               <b>Draft</b>
             </div>
             <div className="topbar-right">
-              <span className="pill pill-line"><span className="dot" style={{ background: '#12b76a' }}></span> Draft saved 2 min ago</span>
-              <a className="btn btn-sm" href="/courses">Preview</a>
-              <a className="btn btn-primary btn-sm" href="/courses">Publish to cohort</a>
+              {draft ? (
+                <span className="pill pill-line">
+                  <span className="dot" style={{ background: "#12b76a" }}></span> Saved {draft.when}
+                </span>
+              ) : (
+                <span className="pill pill-line">
+                  <span className="dot" style={{ background: "#98a2b3" }}></span> Nothing saved yet
+                </span>
+              )}
+              <a className="btn btn-sm" href={draft ? `/courses/${draft.id}` : "/courses"}>
+                {draft ? "Open editor" : "All courses"}
+              </a>
+              <a className="btn btn-primary btn-sm" href={draft ? `/courses/${draft.id}` : "/courses"}>
+                {draft ? "Review & publish" : "New course"}
+              </a>
             </div>
           </div>
 

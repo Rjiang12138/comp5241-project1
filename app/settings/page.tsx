@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import ResetDemoForm from "@/components/ResetDemoForm";
 import { getSession } from "@/lib/auth";
-import { resetDemoDataAction } from "./actions";
+import { resetDemoDataAction, saveProfileAction } from "./actions";
 import { signOutAction } from "../login/actions";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +11,11 @@ export const metadata = { title: "Settings — Praxis" };
 /**
  * Account settings.
  *
- * Deliberately read-only. The prototype's sidebar had a Settings item pointing
- * at "#", which reads as a broken link during a demo. Rather than invent a
- * settings surface nobody asked for, this shows what the session actually knows
- * and says plainly which parts are not editable yet — the honest version of a
- * page that does not exist.
+ * Editable: the display name, because it is the one field the user owns and
+ * every table reads it from the same row. Read-only: email, role and the
+ * workspace defaults, each for a stated reason rather than "not built yet" —
+ * the prototype's sidebar pointed Settings at "#", and a page that admits what
+ * it will not do is better than a link that goes nowhere.
  */
 
 function Row({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
@@ -30,9 +30,13 @@ function Row({ label, value, hint }: { label: string; value: React.ReactNode; hi
   );
 }
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ reset?: string }> }) {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reset?: string; profile?: string }>;
+}) {
   const session = await getSession();
-  const { reset } = await searchParams;
+  const { reset, profile } = await searchParams;
 
   return (
     <Shell
@@ -57,6 +61,37 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <p>Account and workspace defaults for the signed-in user.</p>
         </div>
       </div>
+
+      {profile === "saved" ? (
+        <div
+          className="card card-pad"
+          style={{ background: "#f3fbf6", borderColor: "#c8ecd6", marginBottom: "14px" }}
+          role="status"
+        >
+          <div className="eyebrow" style={{ color: "#0f7a4a" }}>
+            Name saved
+          </div>
+          <div style={{ fontSize: "12.5px", marginTop: "6px", lineHeight: 1.6 }}>
+            Every table that shows your name reads it from the same row, so the change is already visible on the
+            courses you own.
+          </div>
+        </div>
+      ) : null}
+
+      {profile === "short" ? (
+        <div
+          className="card card-pad"
+          style={{ background: "#fffdf5", borderColor: "#fde9c8", marginBottom: "14px" }}
+          role="status"
+        >
+          <div className="eyebrow" style={{ color: "#b45309" }}>
+            Name not saved
+          </div>
+          <div style={{ fontSize: "12.5px", marginTop: "6px", lineHeight: 1.6 }}>
+            A display name needs at least two characters. Nothing was changed.
+          </div>
+        </div>
+      ) : null}
 
       {reset === "done" ? (
         <div
@@ -94,7 +129,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="card">
             <div className="card-head">
               <h3>Account</h3>
-              <span className="pill pill-line">read only</span>
+              <span className="pill pill-line">{session.role}</span>
             </div>
             <div className="card-body" style={{ paddingTop: "6px" }}>
               <div className="row" style={{ padding: "10px 0 14px", gap: "11px" }}>
@@ -106,9 +141,23 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <div className="tiny muted">{session.label}</div>
                 </div>
                 <span className={session.role === "admin" ? "pill pill-amber" : "pill pill-brand"} style={{ marginLeft: "auto" }}>
-                  {session.role === "admin" ? "Admin" : "Instructor"}
+                  {session.role === "admin" ? "Admin" : session.role === "instructor" ? "Instructor" : "Learner"}
                 </span>
               </div>
+
+              <form action={saveProfileAction}>
+                <div className="field">
+                  <label htmlFor="name">Display name</label>
+                  <div className="row">
+                    <input className="input" id="name" name="name" defaultValue={session.name} />
+                    <button className="btn btn-sm" type="submit">
+                      Save
+                    </button>
+                  </div>
+                  <div className="hint">Shown on courses you own and in the cohort tables.</div>
+                </div>
+              </form>
+
               <Row label="Email" value={<span className="mono">{session.email}</span>} hint="Used as the sign-in identity" />
               <Row
                 label="Role"
@@ -126,16 +175,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="card">
             <div className="card-head">
               <h3>Workspace defaults</h3>
-              <span className="pill pill-amber">not editable yet</span>
+              <span className="pill pill-line">fixed for this build</span>
             </div>
             <div className="card-body" style={{ paddingTop: "6px" }}>
               <Row label="Term" value="2026/27 S1" hint="Applied to new cohorts and generated courses" />
               <Row label="Default audience" value="Mixed cohort" hint="The generation prompt starts here" />
-              <Row label="Language" value="EN · 繁中 · 简中" hint="Learner-facing copy, not the instructor UI" />
-              <Row label="Cohort import" value="Moodle · CSV" hint="Roster source for a new class" />
+              <Row label="Language" value="English" hint="Learner-facing copy is English only; switching languages is not built" />
+              <Row label="Cohort import" value="CSV roster" hint="Paste a roster on the course page; Moodle export columns are accepted as-is" />
               <div className="footnote" style={{ marginTop: "12px" }}>
-                These become editable per workspace in week 10. Until then they are the values every new course
-                starts from, listed here so you can see what the platform assumes.
+                These are single-workspace values, not per-user preferences: one deployment, one term, one language.
+                Making them editable per workspace is the change to make if Praxis is ever used by two departments.
               </div>
             </div>
           </div>
@@ -148,8 +197,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </div>
             <div className="card-body">
               <p className="tiny muted" style={{ lineHeight: 1.6 }}>
-                This build signs you in as a demo user with a cookie — no password, no signature. The Clerk
-                integration replaces this in week 10 and keeps the same session shape.
+                This build signs you in with a cookie that names a demo user — no password, no signature. Every
+                route reads the role off that cookie on the server, so the access rules are real even though the
+                credential is not.
               </p>
               <form action={signOutAction} style={{ marginTop: "12px" }}>
                 <button className="btn btn-sm" type="submit" style={{ width: "100%", justifyContent: "center" }}>
@@ -190,11 +240,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
           <div className="card card-pad" style={{ background: "#fffdf5", borderColor: "#fde9c8" }}>
             <div className="eyebrow" style={{ color: "#b45309" }}>
-              Known gap
+              What is not here
             </div>
             <div style={{ fontSize: "12.5px", marginTop: "6px", lineHeight: 1.6 }}>
-              Your name, email, role and the workspace defaults are read-only. Only the demo reset above
-              changes anything. Editing the account is a week 11 task if it survives scope review.
+              Email and role are read-only because they are the identity the session was created with — changing
+              your own role from this page would be a permission bug with a friendly label. Workspace defaults are
+              fixed for the same reason: one term, one language, one deployment.
             </div>
           </div>
         </div>

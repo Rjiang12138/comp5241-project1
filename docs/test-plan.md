@@ -195,52 +195,66 @@ prototype. It belongs to R5's screen, not R3's.
 
 A `curl` POST proves the server accepts a write. It does not prove the browser
 sends one. The table below was produced by driving a real Chrome over the
-DevTools Protocol and counting, per screen, how many controls are bound to a
-server action and how many are inert prototype markup.
+DevTools Protocol and classifying every `button`, `a`, `input`, `select` and
+`textarea` on the page:
 
-| Screen | Controls | Wired | Not wired | Verdict |
-| --- | --- | --- | --- | --- |
-| `/courses/[id]` editor | 57 | 55 | 2 | real: every module/activity edit writes to Postgres |
-| `/admin` | 5 | 5 | 0 | real |
-| `/courses` catalogue | 17 | 17 | 0 | links only, nothing to wire |
-| `/studio` | 20 | 18 | 2 | brief form and the whole pipeline are real; "Preview" and "Publish to cohort" land on the catalogue |
-| `/insights` | 18 | 8 | 10 | range filter, Export, Dismiss, Apply are inert |
-| `/path` | 18 | 3 | 15 | the whole path builder is inert |
-| `/learn` | 19 | 2 | 17 | the whole player is inert |
+- **wired** — an anchor with a real `href`, or a control inside a form that
+  carries a server-action field (`$ACTION_ID_…`) or a GET action;
+- **client** — a hydrated React control whose behaviour lives in the browser
+  (segmented controls, quiz options, the player's completion button);
+- **disabled** — declared inert, with a `title` saying why;
+- **dead** — none of the above.
 
-The editor's 2 are "Export CSV" and "Compare v2 → v3", and both are already
-`disabled` with a `title` naming the week they land. That is the pattern this
-codebase uses for anything not built yet: **a control that says what it is beats
-a control that looks alive and does nothing.** The other four screens do not
-follow it — their buttons are live-looking and silent.
+Production React does not expose handlers on the DOM node, so "client" cannot be
+proven by inspection. Each of those controls was driven by hand and its effect
+checked in Postgres, which is the evidence listed in §8.5–§8.7.
 
-This is the honest state of the product: **four surfaces are real, three are
-still the prototype.** The three are inert for the same reason — they were
-ported verbatim from `prototype/`, and the prototype had no behaviour behind
-them. Anything demoed from Insights, Path or Learn is a screenshot, not a
-feature, and should be described that way in the week 8 meeting.
+| Screen | Controls | Wired | Client | Disabled | Dead |
+| --- | --- | --- | --- | --- | --- |
+| `/` landing | 8 | 8 | 0 | 0 | 0 |
+| `/studio` | 26 | 19 | 7 | 0 | 0 |
+| `/courses` catalogue | 17 | 17 | 0 | 0 | 0 |
+| `/courses/[id]` editor | 299 | 297 | 0 | 2 | 0 |
+| `/courses/[id]/versions` | 15 | 15 | 0 | 0 | 0 |
+| `/insights` | 45 | 45 | 0 | 0 | 0 |
+| `/path` | 58 | 54 | 0 | 4 | 0 |
+| `/learn` (role play) | 21 | 14 | 7 | 0 | 0 |
+| `/settings` | 15 | 15 | 0 | 0 | 0 |
 
-`/studio` moved from the inert list to the real one, and the move is worth
-recording because of *how* it was inert. The screen had 23 prototype controls
-and a script in `components/PrototypeScripts.tsx` that simulated generation:
-click `#genBtn`, fade the outline, light the log steps, print "Draft ready · 5
-modules". Once the real action was wired, that script did not politely step
-aside — it had attached its own click handler to the same button, so pressing
-"Generate outline" ran the animation *instead of* the server action and then
-overwrote the real status line with the canned text. The first end-to-end run
-"passed" in 0.5 s with zero module rows. **A fake that wins the race against the
-real thing is worse than no fake at all**, and the simulation block is now
-deleted rather than disabled.
+**Zero dead controls.** The six that are disabled say why: the editor's "Move up"
+on the first module and "Move down" on the last, and `/path`'s four "Swap"
+buttons when every published course is already in the path.
 
-Six prototype controls on that screen were removed rather than wired: "Shuffle",
+This table replaces an earlier one that read *"four surfaces are real, three are
+still the prototype"*. That was true in week 9 and is not true now: `/learn`,
+`/insights` and `/path` were rebuilt against the event log, and the transition is
+worth recording because of *how* the old ones were inert.
+
+The prototype behaviour lived in one place — `components/PrototypeScripts.tsx` —
+which looked up the ids the ported markup already emitted and animated them.
+That was fine while the screens were static, and actively harmful once they were
+not:
+
+- `#genBtn` ran a canned "Draft ready · 5 modules" animation *instead of* the
+  server action, because it had attached its own click handler to the same
+  button. The first end-to-end run "passed" in 0.5 s with zero module rows.
+- `#buildPath` did the same on `/path`: it faded the timeline, printed
+  "4-step path saved to your workspace", and flipped the button to "Regenerate
+  path" — while the `LearningPath` table stayed empty. A `curl` POST to the same
+  form returned 200 with the page unchanged, which is what sent us looking.
+
+Both blocks are gone, and so is the file: the last of it was the toast helper and
+the segmented-control handler, neither of which had a caller. **A fake that wins
+the race against the real thing is worse than no fake at all**, and a fake that
+merely decorates is still a lie about what the product does.
+
+Six prototype controls on `/studio` were removed rather than wired: "Shuffle",
 "+ Add module / Suggest", "Compare with last draft", "Send for review", "Fix
 accessibility gap", and the invented finding "Captions missing for 2 narrated
-slides". None of them had a behaviour to recover — two implied features we have
-not built (version compare, module suggestion), and one was a fabricated
-pedagogy result. The pedagogy panel is now computed from the outline (four
-checks: objectives map to activities, module count under seven, retrieval
-practice last, a hands-on activity in every module), so its score is a fact
-rather than a typographic decoration.
+slides". None had a behaviour to recover. The pedagogy panel is now computed from
+the outline (four checks: objectives map to activities, module count under seven,
+retrieval practice last, a hands-on activity in every module), so its score is a
+fact rather than a typographic decoration.
 
 ### 8.3 Demo reset button (`/settings`)
 
@@ -320,3 +334,108 @@ the same outline; two produced grounded, usable sequences (45 minutes exactly,
 titles traceable to the slides), two produced nothing usable. The two that
 worked are the chain; the two that did not are documented in `lib/llm.ts` so
 nobody re-adds them by reading a leaderboard.
+
+### 8.5 The learner runtime writes events (`/learn`)
+
+The player is the one screen where "it renders" and "it works" are furthest
+apart: eight activity formats, each with its own way of being finished. The test
+is not that the button is clickable but that finishing an activity appends a row
+and that the row changes the next page.
+
+| Check | Result |
+| --- | --- |
+| Baseline before the run | `events` = 275 (`started` 98 · `completed` 98 · `attempted` 8 · `tutor_asked` 69 · `hint` 2) |
+| Pick a simulation option, then "Complete and continue" | `events` = 278: `attempted` ×2, `completed` ×1 |
+| Progress after the click | `1 / 7` → `2 / 7`, 14% → 29%, next activity loaded |
+| Opening an activity | one `activity_started` per (enrolment, activity), written on render |
+| Re-opening the same activity twice | still one row — `recordStart` is idempotent |
+| Hint button on a fresh code lab | `disabled`, label "Hint after 2 attempts" |
+| Hint after one failed "Run checks" (CS track) | still disabled; after the second failure it unlocks |
+| Hint on the non-CS track | unlocks after one failure, which is what the page has always claimed |
+| Quiz grading | answers are checked per question; "Complete" stays disabled until every question is answered |
+
+Two defects, both fixed:
+
+1. **The preview changed identity on every save.** `previewLearner` picked the
+   enrolment closest to halfway, so completing an activity changed the numbers,
+   the next request picked somebody else, and the banner went from "Previewing as
+   Jun Hao Lim" to "Omar Haddad" without anyone asking. The choice is now pinned
+   in a `praxis_preview` cookie and there is a "Next learner" control for when you
+   *do* want to change it.
+2. **The pace rule existed only in a paragraph.** The player told every learner
+   "the hint waits until you have tried twice" and then offered the hint
+   immediately. It now enforces one failure on the non-CS track and two on the CS
+   track, and says so on the disabled button.
+
+### 8.6 Analytics is a query, not a counter (`/insights`)
+
+Every number on the screen is computed from `events` on the request that renders
+it, so the screen and the player cannot disagree about what happened.
+
+| Check | Result |
+| --- | --- |
+| Course opened cold | the busiest course, not the alphabetically first one (which has no learners) |
+| Headline stats, all time | 24 learners · 96% active this week · 59% average progress · 2 of 24 finished · median 2.0 attempts · 69 tutor questions |
+| Weekly engagement | 0 · 0 · 0 · 21 · 46 · 71 · 92 · 96 |
+| Completion by format | Simulation 96% · Reading 88% · Code lab 63% · Peer review 46% · Role play 25% · Quiz 8% |
+| The insight | "Learners stop before module 5" — attributed to attrition because every quiz in the course sits in module 5 |
+| Range = 7 days | `?range=7`; attempts and questions are windowed, progress is not |
+| Export | `GET /insights/export?course=c-sef&range=7` → `text/csv`, `Content-Disposition: attachment` |
+| Nudge | writes a `nudge_sent` row; `Dismiss` hides the card for 7 days via cookie and can be undone |
+
+Four defects this found:
+
+1. **The insight was confidently wrong.** "Quiz finishes 8% of the time" was
+   rendered as "quizzes are hard" when the quiz is simply the last activity in
+   the course. Position and difficulty are different claims; the code now
+   measures where the weak format sits before choosing which one to make.
+2. **Median attempts read 0.0.** Attempts were keyed by `activityId` alone and
+   then filtered by the `since` window, so retries outside the window vanished.
+   Keyed by `enrolment:activity` and counted inside the window it reads 2.0.
+3. **"0 of 24 finished every activity" on the 7-day view.** Progress is a state;
+   a state does not reset because the instructor picked a range. The windowed
+   read now feeds attempts and questions only.
+4. **A fixed term start made the fixture look dead.** Events anchored to
+   2026-09-14 produced "0% active this week". The fixture is now generated
+   relative to `Date.now()`, which is what a demo cohort should look like.
+
+### 8.7 The path builder sequences real courses (`/path`)
+
+| Check | Result |
+| --- | --- |
+| Press "Design my path" in a real browser | 303 → `/path?generated=1`; the button reads "Designing…" while the model runs |
+| Row written | `LearningPath` 1 · `PathStep` 4, `model = poolside/laguna-s-2.1:free` |
+| Steps | Week 1 Software Engineering Foundations (library) · Week 2 HTTP, APIs and Data Modeling (gap) · Week 3 Databases, SQL and Authentication (gap) · Week 4 Interview Prep and System Design Basics (gap) |
+| Gaps | marked `gap` in the timeline and linked to `/studio`, not to a dead course |
+| "Mark done" | step status `not_started` → `done`, progress 100%, button flips to "Reopen" |
+| "Swap" | step 2 replaced with the one unused published course, `detail` ends "· swapped in" |
+| "Swap" when every course is already used | `disabled`, title "Every published course is already in this path" |
+| "Start" | enrols the learner and redirects to `/learn?course=…` |
+| "Start over" | deletes the path row; the page returns to "No path yet" |
+
+The first version of this screen was inert in the worst way: the prototype script
+faded the timeline, printed "4-step path saved to your workspace", and flipped the
+button to "Regenerate path" — all with an empty `LearningPath` table. The toast
+was the only evidence, and it was fabricated.
+
+### 8.8 The course editor reports the cohort, not a fixture
+
+The editor used to print four hard-coded statistics and a per-learner table keyed
+by user id — the same numbers on every course, whatever anyone had done. They are
+now `courseAnalytics()` and `learnerProgress()` over the same event log.
+
+| Check | Result |
+| --- | --- |
+| Headline stats | 24 enrolled · 96% active this week · 59% average progress · 2 finished · median 27 min completed · 22 not finished |
+| Cohort table | Mei Wong 7/7 Finished · Arjun Lee 6/7 Active 2d ago · Sara Khan 5/7 Idle 3 days — each row a query |
+| Export CSV | `GET /courses/c-sef/export` → 24 rows, `Content-Disposition: attachment` |
+| Publish v4 | `CourseVersion` row written with a `snapshot` of the tree in the same transaction |
+| Rename a module, publish v5, open Versions | "v4 → v5 · 1 change · renamed module · Module 4 — was 'Design review role play' · now 'Design review role play (edited)'" |
+| Version with no snapshot (v1–v3) | says so instead of rendering an empty diff |
+| Import a roster | paste `Test Person,test.person@example.edu` → 303 `?roster=1`; user created, enrolment `importedFrom = csv`; re-importing the same line adds nobody |
+| Adaptation rules card | shows the rule that is enforced (hint after 1 or 2 failures), the real non-CS count, and marks language and captions as not built |
+
+The roster import exists because the admin screen has claimed "students import
+themselves from a Moodle roster or CSV, driven from the course page" since week
+8, and until now there was no such control. Either the sentence goes or the
+control does; the control was cheaper than the apology.

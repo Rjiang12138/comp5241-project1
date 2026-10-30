@@ -1,7 +1,233 @@
-import Path from "@/components/ported/Path";
+import PathBuilder from "@/components/PathBuilder";
+import { getSession } from "@/lib/auth";
+import { getLatestPath, pathLibrary } from "@/lib/store";
+import {
+  clearPathAction,
+  completeStepAction,
+  designPathAction,
+  reopenStepAction,
+  startStepAction,
+  swapStepAction,
+} from "./actions";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Learning path — Praxis" };
 
-export default function PathPage() {
-  return <Path />;
+type Search = { generated?: string; error?: string };
+
+const DOMAIN_LABEL: Record<string, string> = {
+  backend: "Backend",
+  data: "Data",
+  product: "Product",
+  design: "Design",
+};
+
+export default async function PathPage({ searchParams }: { searchParams: Promise<Search> }) {
+  const params = await searchParams;
+  const session = await getSession();
+  const [path, library] = await Promise.all([getLatestPath(session.userId), pathLibrary()]);
+
+  const doneCount = path ? path.steps.filter((step) => step.status === "done").length : 0;
+  const gaps = path ? path.steps.filter((step) => !step.courseId).length : 0;
+  const nowIndex = path ? path.steps.findIndex((step) => step.status !== "done") : -1;
+
+  // Swap can only offer a course this path has not used yet. When every
+  // published course is already in the path the button has nothing to give, and
+  // a control that does nothing when pressed is the thing this build is trying
+  // to stop doing.
+  const usedIds = new Set((path?.steps ?? []).map((step) => step.courseId).filter(Boolean) as string[]);
+  const canSwap = library.some((course) => !usedIds.has(course.id));
+
+  return (
+    <>
+      <div className="player-top">
+        <a className="exit" href="/" title="Home">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M15 5l-7 7 7 7" /></svg>
+        </a>
+        <div>
+          <div className="player-title">My learning</div>
+          <div className="player-sub">Self-directed path · {session.name}</div>
+        </div>
+        <div style={{ marginLeft: "auto" }} className="row">
+          <a className="btn btn-sm" href="/learn">Resume last course</a>
+          <a className="btn btn-sm" href="/courses">Instructor view</a>
+          <span className="avatar">{session.initials}</span>
+        </div>
+      </div>
+
+      <div className="page" style={{ maxWidth: "1260px", margin: "0 auto" }}>
+        <div className="page-head">
+          <div>
+            <h1 style={{ fontSize: "24px" }}>Build a path, not a playlist</h1>
+            <p>Tell Praxis where you want to be. It sequences existing mini-courses and marks the ones it would have to generate.</p>
+          </div>
+          <span className="pill pill-teal">{library.length} courses in the library</span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "348px minmax(0,1fr)", gap: "18px", alignItems: "start" }}>
+          <div className="stack">
+            <PathBuilder
+              action={designPathAction}
+              defaultGoal={path?.goal}
+              error={params.error === "goal" ? "Say a little more about the outcome — twelve characters is the minimum." : undefined}
+            />
+
+            <div className="card card-pad">
+              <div className="eyebrow">Already in the library</div>
+              <div className="stack mt-12" style={{ gap: "9px" }}>
+                {library.length === 0 ? (
+                  <div className="tiny muted">Nothing is published yet.</div>
+                ) : (
+                  library.map((course) => (
+                    <div className="between" style={{ fontSize: "12.5px" }} key={course.id}>
+                      <span>{course.title}</span>
+                      <span className="tiny muted">{course.minutes} min</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="footnote">
+                A step with no course behind it is a gap, not a placeholder: the library genuinely cannot fill it, and
+                the path says so instead of linking somewhere useless.
+              </div>
+            </div>
+          </div>
+
+          {path ? (
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <h3>
+                    {DOMAIN_LABEL[path.domain] ?? path.domain} · {path.weeks}-week path
+                  </h3>
+                  <div className="tiny muted" style={{ marginTop: "2px" }}>
+                    {path.steps.length} steps · {path.hoursPerWeek} h / week · {path.level}, {path.steps.filter((step) => step.courseId).length} from the library
+                    {gaps > 0 ? ` · ${gaps} would need generating` : ""}
+                  </div>
+                </div>
+                <div className="row">
+                  <span className={path.model === "template-v1" ? "pill pill-line" : "pill pill-brand"}>
+                    {path.model === "template-v1" ? "Sequenced by rule" : "AI-sequenced"}
+                  </span>
+                  <form action={clearPathAction}>
+                    <button className="btn btn-sm" type="submit">Start over</button>
+                  </form>
+                </div>
+              </div>
+
+              <div className="card-body">
+                <div className="timeline">
+                  {path.steps.map((step, index) => {
+                    const status = step.status === "done" ? "done" : index === nowIndex ? "now" : "";
+                    const progress = step.status === "done" ? 100 : index === nowIndex ? 40 : 0;
+                    return (
+                      <div className={`tl-item ${status}`} key={step.id}>
+                        <div className="between" style={{ alignItems: "flex-start" }}>
+                          <div>
+                            <div className="row" style={{ gap: "8px" }}>
+                              <b style={{ fontSize: "13.6px" }}>{step.title}</b>
+                              <span className={step.status === "done" ? "pill pill-teal" : index === nowIndex ? "pill pill-brand" : "pill"}>
+                                {step.status === "done" ? "done" : index === nowIndex ? "you are here" : "not started"}
+                              </span>
+                              {!step.courseId ? <span className="pill pill-amber">gap</span> : null}
+                            </div>
+                            <div className="tiny muted" style={{ marginTop: "3px" }}>
+                              {Math.round(step.minutes / 60 * 10) / 10} h · {step.detail}
+                            </div>
+                          </div>
+                          <span className="tiny muted">{progress}%</span>
+                        </div>
+
+                        <div className="row mt-8" style={{ gap: "8px", flexWrap: "wrap" }}>
+                          {step.courseTitle ? <span className="pill pill-line">{step.courseTitle}</span> : null}
+
+                          {step.courseId ? (
+                            <form action={startStepAction}>
+                              <input type="hidden" name="courseId" value={step.courseId} />
+                              <button className="btn btn-sm btn-primary" type="submit">
+                                {step.status === "done" ? "Replay" : "Start"}
+                              </button>
+                            </form>
+                          ) : (
+                            <a className="btn btn-sm" href="/studio">
+                              Generate this course
+                            </a>
+                          )}
+
+                          <form action={swapStepAction}>
+                            <input type="hidden" name="stepId" value={step.id} />
+                            <button
+                              className="btn btn-sm btn-ghost"
+                              type="submit"
+                              disabled={!canSwap}
+                              title={canSwap ? "Replace with the best unused course in the library" : "Every published course is already in this path — generate another one to swap it in"}
+                            >
+                              Swap
+                            </button>
+                          </form>
+
+                          <form action={step.status === "done" ? reopenStepAction : completeStepAction}>
+                            <input type="hidden" name="stepId" value={step.id} />
+                            <button className="btn btn-sm btn-ghost" type="submit">
+                              {step.status === "done" ? "Reopen" : "Mark done"}
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="card-body" style={{ borderTop: "1px solid var(--line-2)", background: "#fbfbfd", borderRadius: "0 0 12px 12px" }}>
+                <div className="between">
+                  <div className="row tiny muted" style={{ maxWidth: "560px", lineHeight: "1.5" }}>
+                    <span style={{ color: "#4338ca" }}>◈</span>
+                    {path.model === "template-v1"
+                      ? "Why this order: the steps run shortest first, so the first week cannot fail. Each one assumes the evidence the previous one produced — you cannot review a diff before you have shipped one."
+                      : `Why this order: ${path.model} sequenced the weeks against your goal, your level and the hours you can give it. Each step assumes the evidence the previous one produced — you cannot review a diff before you have shipped one.`}
+                  </div>
+                  <div className="row">
+                    <span className="tiny muted" style={{ whiteSpace: "nowrap" }}>{doneCount} of {path.steps.length} done</span>
+                    <span className="pill pill-line">{params.generated ? "just generated" : `model: ${path.model}`}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <h3>No path yet</h3>
+                  <div className="tiny muted" style={{ marginTop: "2px" }}>
+                    Describe the goal on the left and press Design my path.
+                  </div>
+                </div>
+              </div>
+              <div className="card-body">
+                <div className="tiny muted" style={{ lineHeight: 1.7, maxWidth: "620px" }}>
+                  The builder scores every published course against your goal, drops the ones that do not fit, and
+                  orders what is left from shortest to longest. When nothing in the library fits a week, it says so
+                  instead of linking you to a course that will waste the week.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card card-pad mt-16" style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <div style={{ width: "34px", height: "34px", borderRadius: "9px", background: "#ecfdf5", color: "#0f766e", display: "grid", placeItems: "center" }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M4 6h16M4 12h10M4 18h7" /></svg>
+          </div>
+          <div style={{ flex: "1" }}>
+            <div style={{ fontSize: "13px", fontWeight: "600" }}>Need a subject Praxis has never taught?</div>
+            <div className="tiny muted" style={{ marginTop: "2px" }}>
+              Upload your own material in the studio and the course becomes available here for everyone.
+            </div>
+          </div>
+          <a className="btn btn-sm" href="/studio">Generate a new course</a>
+        </div>
+      </div>
+    </>
+  );
 }

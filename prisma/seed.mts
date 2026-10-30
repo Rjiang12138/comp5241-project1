@@ -15,7 +15,7 @@ seedDemoData(prisma)
   .then((s) => {
     console.log(
       `seeded: ${s.users} users · ${s.cohorts} cohorts · ${s.courses} courses · ` +
-        `${s.modules} modules · ${s.activities} activities · ${s.enrolments} enrolments`,
+        `${s.modules} modules · ${s.activities} activities · ${s.enrolments} enrolments · ${s.events} events`,
     );
   })
   .catch((error) => {

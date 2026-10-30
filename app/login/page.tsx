@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
-import { listStaff } from "@/lib/store";
+import { listSignableUsers } from "@/lib/store";
 import { signInAction, signOutAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -17,9 +17,31 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+const ROLE_PILL: Record<string, { label: string; className: string }> = {
+  admin: { label: "Admin", className: "pill pill-amber" },
+  instructor: { label: "Instructor", className: "pill pill-brand" },
+  learner: { label: "Learner", className: "pill pill-teal" },
+};
+
 export default async function LoginPage() {
   const session = await getSession();
-  const staff = await listStaff();
+  const users = await listSignableUsers();
+  const staff = users.filter((user) => user.role !== "learner");
+  const learners = users.filter((user) => user.role === "learner");
+
+  const card = (user: (typeof users)[number]) => (
+    <form action={signInAction} key={user.id}>
+      <input type="hidden" name="userId" value={user.id} />
+      <button className="signin-card" type="submit" style={{ width: "100%" }}>
+        <div className="row">
+          <span className="avatar">{initials(user.name)}</span>
+          <span className={ROLE_PILL[user.role]?.className ?? "pill"}>{ROLE_PILL[user.role]?.label ?? user.role}</span>
+        </div>
+        <div className="who">{user.name}</div>
+        <div className="tiny muted">{user.email}</div>
+      </button>
+    </form>
+  );
 
   return (
     <div className="signin-wrap">
@@ -40,23 +62,15 @@ export default async function LoginPage() {
           </div>
         </div>
 
-        <div className="signin-grid">
-          {staff.map((user) => (
-            <form action={signInAction} key={user.id}>
-              <input type="hidden" name="userId" value={user.id} />
-              <button className="signin-card" type="submit" style={{ width: "100%" }}>
-                <div className="row">
-                  <span className="avatar">{initials(user.name)}</span>
-                  <span className={user.role === "admin" ? "pill pill-amber" : "pill pill-brand"}>
-                    {user.role === "admin" ? "Admin" : "Instructor"}
-                  </span>
-                </div>
-                <div className="who">{user.name}</div>
-                <div className="tiny muted">{user.email}</div>
-              </button>
-            </form>
-          ))}
+        <div className="side-label" style={{ padding: "0 2px 8px" }}>
+          Staff
         </div>
+        <div className="signin-grid">{staff.map(card)}</div>
+
+        <div className="side-label" style={{ padding: "18px 2px 8px" }}>
+          Learners
+        </div>
+        <div className="signin-grid">{learners.map(card)}</div>
 
         <div className="between" style={{ marginTop: "16px" }}>
           <span className="tiny muted">
@@ -75,8 +89,9 @@ export default async function LoginPage() {
         </div>
 
         <div className="footnote" style={{ marginTop: "22px" }}>
-          No passwords in this build: picking a role writes the same session cookie a real provider will write. The
-          Clerk integration is scheduled for week 10 and replaces this page, not the pages behind it.
+          No passwords in this build: picking a person writes the same session cookie a real provider would write,
+          and every route behind this page reads the role off that cookie on the server. Swapping the provider
+          replaces this page, not the pages behind it.
         </div>
       </div>
     </div>

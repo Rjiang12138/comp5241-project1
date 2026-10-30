@@ -74,6 +74,7 @@ model User {
   authoredCourses Course[]     @relation("CourseOwner")
   enrollments     Enrollment[]
   taughtCohorts   Cohort[]     @relation("CohortInstructor")
+  paths           LearningPath[]
 
   @@index([role])
 }
@@ -114,6 +115,7 @@ model Course {
   enrollments Enrollment[]
   aiRuns      AiRun[]
   versions    CourseVersion[]
+  pathSteps   PathStep[]
 
   @@index([ownerId])
   @@index([cohortId])
@@ -192,6 +194,9 @@ model CourseVersion {
   courseId  String
   version   Int
   note      String
+  /// The course tree as it stood at publish time, so "compare v3 → v4" can be a
+  /// real diff instead of a note the instructor typed.
+  snapshot  Json?
   createdAt DateTime @default(now())
 
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -230,4 +235,44 @@ model PromptVersion {
   createdAt DateTime @default(now())
 
   @@unique([purpose, version])
+}
+
+/// A self-directed learning path (R9/R10). One row per generation, so a learner
+/// can regenerate and compare instead of losing the previous attempt.
+model LearningPath {
+  id           String   @id @default(cuid())
+  userId       String
+  goal         String
+  domain       String   @default("backend")
+  level        String   @default("beginner")
+  hoursPerWeek Int      @default(4)
+  weeks        Int      @default(4)
+  model        String   @default("template-v1")
+  createdAt    DateTime @default(now())
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps PathStep[]
+
+  @@index([userId, createdAt])
+}
+
+/// One step of a path. `courseId` is set when the step reuses a library course
+/// and null when the step is a gap the library cannot fill — which is the
+/// interesting case, and the one the prototype writes copy about.
+model PathStep {
+  id       String  @id @default(cuid())
+  pathId   String
+  position Int
+  title    String
+  detail   String  @default("")
+  minutes  Int     @default(30)
+  courseId String?
+  /// not_started | in_progress | done
+  status   String  @default("not_started")
+
+  path   LearningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+  course Course?      @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@unique([pathId, position])
+  @@index([pathId])
 }

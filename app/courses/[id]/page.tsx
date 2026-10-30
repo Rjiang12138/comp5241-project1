@@ -4,10 +4,11 @@ import AutoSubmitInput, { AutoSubmitSelect } from "@/components/AutoSubmitInput"
 import { Shell } from "@/components/Shell";
 import { getSession } from "@/lib/auth";
 import { FORMATS, audienceLabel, formatLabel, formatPill, statusLabel, statusPill } from "@/lib/format";
-import { courseMinutes, getCourse } from "@/lib/store";
+import { courseAnalytics, courseMinutes, getCourse, learnerProgress } from "@/lib/store";
 import {
   addActivityAction,
   addModuleAction,
+  importRosterAction,
   moveModuleAction,
   publishCourseAction,
   removeActivityAction,
@@ -24,18 +25,11 @@ export const dynamic = "force-dynamic";
  *
  * The visual language is prototype/course.html: same shell, same card heads,
  * same module rows, same right-hand column. What changed is that the rows are
- * now forms. The prototype's four cohort statistics are kept as they were —
- * they are prototype fixtures until the `events` table is written to (see
- * docs/ai-usage-log.md, rule 7: no invented numbers about our users).
+ * now forms, and the four cohort statistics are queries against the event log
+ * rather than the prototype's fixture numbers. A dashboard that reports 76%
+ * completion because 76 was typed into the prototype is worse than one that
+ * reports 0% and says why.
  */
-
-/** Fixture values from the mid-term prototype, keyed by learner. */
-const LEARNER_FIXTURE: Record<string, { progress: string; done: string; lastActive: string; status: string; pill: string; avatar: string }> = {
-  "u-mei": { progress: "100%", done: "5/5", lastActive: "2 hours ago", status: "On track", pill: "pill pill-teal", avatar: "t" },
-  "u-arjun": { progress: "60%", done: "3/5", lastActive: "Yesterday", status: "Stalled 2d", pill: "pill pill-amber", avatar: "" },
-  "u-sara": { progress: "40%", done: "2/5", lastActive: "3 days ago", status: "At risk", pill: "pill pill-rose", avatar: "rose" },
-  "u-tom": { progress: "80%", done: "4/5", lastActive: "1 hour ago", status: "On track", pill: "pill pill-teal", avatar: "" },
-};
 
 function initials(name: string): string {
   return name
@@ -48,14 +42,31 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+function relative(date: Date | null): string {
+  if (!date) return "never";
+  const hours = Math.floor((Date.now() - date.getTime()) / (60 * 60 * 1000));
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const course = await getCourse(id);
   return { title: course ? `${course.title} — Praxis` : "Course — Praxis" };
 }
 
-export default async function CourseEditorPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CourseEditorPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ roster?: string }>;
+}) {
   const { id } = await params;
+  const query = await searchParams;
+  const added = Number(query.roster) || 0;
   const session = await getSession();
   const course = await getCourse(id);
   if (!course) notFound();
@@ -63,6 +74,18 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
   const totalMinutes = await courseMinutes(course.id);
   const activityCount = course.modules.reduce((sum, m) => sum + m.activities.length, 0);
   const formatOptions = FORMATS.map((format) => ({ value: format, label: formatLabel(format) }));
+  const [analytics, progress] = await Promise.all([
+    courseAnalytics(course.id, null),
+    learnerProgress(course.id),
+  ]);
+  const medianMinutes = (() => {
+    const values = progress.map((row) => row.minutesDone).sort((a, b) => a - b);
+    if (values.length === 0) return 0;
+    const middle = Math.floor(values.length / 2);
+    return values.length % 2 === 0 ? Math.round((values[middle - 1] + values[middle]) / 2) : values[middle];
+  })();
+  const needsNudge = progress.filter((row) => row.total > 0 && row.completed < row.total).length;
+  const stuckCount = progress.filter((row) => row.stuckOn).length;
 
   return (
     <Shell
@@ -111,25 +134,36 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
       <div className="grid-4" style={{ marginBottom: "16px" }}>
         <div className="stat">
           <div className="label">Enrolled</div>
-          <div className="value">{course.learners.length}</div>
-          <div className="delta">+6 this week</div>
+          <div className="value">{analytics.learners}</div>
+          <div className="delta">{analytics.activeThisWeek}% active this week</div>
         </div>
         <div className="stat">
-          <div className="label">Completion</div>
-          <div className="value">76%</div>
-          <div className="delta">+9 pts vs v{course.version - 1}</div>
-        </div>
-        <div className="stat">
-          <div className="label">Median time on task</div>
+          <div className="label">Average progress</div>
           <div className="value">
-            41<span style={{ fontSize: "14px", fontWeight: 500 }}> min</span>
+            {analytics.averageProgress}
+            <span style={{ fontSize: "13px", fontWeight: "500", color: "#98a2b3" }}> %</span>
           </div>
-          <div className="delta">target {course.minutes} min</div>
+          <div className="delta">
+            {analytics.finishedAll} of {analytics.learners} finished every activity
+          </div>
+        </div>
+        <div className="stat">
+          <div className="label">Median minutes completed</div>
+          <div className="value">
+            {medianMinutes}<span style={{ fontSize: "14px", fontWeight: 500 }}> min</span>
+          </div>
+          <div className="delta">of a {totalMinutes} min course</div>
         </div>
         <div className="stat">
           <div className="label">Needs a nudge</div>
-          <div className="value">3</div>
-          <div className="delta down">2 stuck on Module 3</div>
+          <div className="value">{needsNudge}</div>
+          <div className="delta down">
+            {stuckCount > 0
+              ? `${stuckCount} stuck on an activity they have retried`
+              : needsNudge > 0
+                ? "none stuck, just unfinished"
+                : "nobody is behind"}
+          </div>
         </div>
       </div>
 
@@ -345,9 +379,9 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
                 <Link className="btn btn-sm" href="/admin">
                   Manage cohort
                 </Link>
-                <button className="btn btn-sm" type="button" disabled title="CSV export lands with the events table in week 10">
+                <a className="btn btn-sm" href={`/courses/${course.id}/export`}>
                   Export CSV
-                </button>
+                </a>
               </div>
             </div>
             <table className="tbl">
@@ -361,50 +395,85 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
                 </tr>
               </thead>
               <tbody>
-                {course.learners.slice(0, 4).map((learner) => {
-                  const fixture = LEARNER_FIXTURE[learner.id] ?? {
-                    progress: "0%",
-                    done: "0/5",
-                    lastActive: "—",
-                    status: "No activity",
-                    pill: "pill",
-                    avatar: "",
-                  };
+                {progress.slice(0, 6).map((row) => {
+                  const percent = row.total === 0 ? 0 : Math.round((row.completed / row.total) * 100);
                   return (
-                    <tr key={learner.id}>
+                    <tr key={row.userId}>
                       <td style={{ paddingLeft: "20px" }}>
                         <div className="cell-user">
-                          <span className={`avatar ${fixture.avatar}`.trim()}>{initials(learner.name)}</span>
+                          <span className="avatar">{initials(row.name)}</span>
                           <div>
-                            <b style={{ fontWeight: 600 }}>{learner.name}</b>
-                            <div className="tiny muted">{learner.email}</div>
+                            <b style={{ fontWeight: 600 }}>{row.name}</b>
+                            <div className="tiny muted">{row.email}</div>
                           </div>
                         </div>
                       </td>
                       <td>
-                        <span className={learner.background === "non_cs" ? "pill pill-brand" : "pill"} style={learner.background === "cs" ? { background: "#eef2f6" } : undefined}>
-                          {learner.background === "non_cs" ? "Non-CS" : "CS"}
+                        <span className={row.background === "non_cs" ? "pill pill-brand" : "pill"} style={row.background === "cs" ? { background: "#eef2f6" } : undefined}>
+                          {row.background === "non_cs" ? "Non-CS" : "CS"}
                         </span>
                       </td>
                       <td>
                         <div className="row">
                           <div className="progress" style={{ width: "80px" }}>
-                            <i style={{ width: fixture.progress }} />
+                            <i style={{ width: `${percent}%` }} />
                           </div>
-                          <span className="tiny">{fixture.done}</span>
+                          <span className="tiny">{row.completed}/{row.total}</span>
                         </div>
                       </td>
-                      <td className="muted">{fixture.lastActive}</td>
+                      <td className="muted">{relative(row.lastActive)}</td>
                       <td>
-                        <span className={fixture.pill}>{fixture.status}</span>
+                        <span className={row.tone === "teal" ? "pill pill-teal" : row.tone === "amber" ? "pill pill-amber" : "pill pill-rose"}>
+                          {row.signal}
+                        </span>
                       </td>
                     </tr>
                   );
                 })}
+                {progress.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted" style={{ paddingLeft: "20px", fontSize: "12px" }}>
+                      Nobody is enrolled yet. Publish the course and it appears on the learner side.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
             <div className="tiny muted" style={{ padding: "0 20px 14px" }}>
-              Progress and status are prototype fixtures until the learner runtime writes to the event log.
+              {progress.length > 6 ? `Showing 6 of ${progress.length}. ` : ""}
+              Progress and status are computed from the event log on every request — the same query that feeds
+              /insights, so the two screens cannot disagree.
+            </div>
+
+            <div className="card-body" style={{ borderTop: "1px solid var(--line-2)" }}>
+              <form action={importRosterAction}>
+                <input type="hidden" name="courseId" value={course.id} />
+                <label htmlFor="roster" style={{ fontSize: "12.6px", fontWeight: 600 }}>
+                  Import a roster
+                </label>
+                <div className="tiny muted" style={{ marginTop: "2px", marginBottom: "8px" }}>
+                  One person per line — <span className="mono">name,email</span> or just an email. People who do not
+                  exist yet are created; people already enrolled are skipped.
+                </div>
+                <textarea
+                  className="textarea mono"
+                  id="roster"
+                  name="roster"
+                  rows={3}
+                  placeholder={"Mei Chan,mei.chan@example.edu\narjun.rao@example.edu"}
+                  style={{ minHeight: "66px", fontSize: "12px" }}
+                />
+                <div className="row mt-8">
+                  <button className="btn btn-sm" type="submit">
+                    Add to cohort
+                  </button>
+                  {added ? (
+                    <span className="tiny" style={{ color: "#0f7a4a" }}>
+                      {added} learner{added === 1 ? "" : "s"} added
+                    </span>
+                  ) : null}
+                </div>
+              </form>
             </div>
           </div>
         </div>
@@ -451,21 +520,23 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
           <div className="card">
             <div className="card-head">
               <h3>Adaptation rules</h3>
-              <span className="pill pill-brand">On</span>
+              <span className="pill pill-brand">{audienceLabel(course.audience)}</span>
             </div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <div className="between">
                 <div>
                   <div style={{ fontSize: "12.6px", fontWeight: 600 }}>By background</div>
-                  <div className="tiny muted">Non-CS gets analogies first</div>
+                  <div className="tiny muted">Non-CS reads an analogy first, CS leads with the rule</div>
                 </div>
-                <span className="pill pill-teal">Active</span>
+                <span className="pill pill-teal">
+                  {progress.filter((row) => row.background === "non_cs").length} non-CS
+                </span>
               </div>
               <div className="divider" />
               <div className="between">
                 <div>
                   <div style={{ fontSize: "12.6px", fontWeight: 600 }}>By pace</div>
-                  <div className="tiny muted">Two stalls → easier variant</div>
+                  <div className="tiny muted">Hint unlocks after 1 failed attempt (non-CS) or 2 (CS)</div>
                 </div>
                 <span className="pill pill-teal">Active</span>
               </div>
@@ -473,7 +544,7 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
               <div className="between">
                 <div>
                   <div style={{ fontSize: "12.6px", fontWeight: 600 }}>Language</div>
-                  <div className="tiny muted">EN · 繁中 · 简中</div>
+                  <div className="tiny muted">English only — switching is not built</div>
                 </div>
                 <span className="pill pill-line">EN</span>
               </div>
@@ -481,12 +552,12 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
               <div className="between">
                 <div>
                   <div style={{ fontSize: "12.6px", fontWeight: 600 }}>Accessibility</div>
-                  <div className="tiny muted">Captions on generated audio</div>
+                  <div className="tiny muted">Captions on generated audio — no audio is generated yet</div>
                 </div>
-                <span className="pill pill-amber">2 gaps</span>
+                <span className="pill pill-amber">not built</span>
               </div>
-              <Link className="btn btn-sm" style={{ justifyContent: "center" }} href="/studio">
-                Edit rules
+              <Link className="btn btn-sm" style={{ justifyContent: "center" }} href={`/learn?course=${course.id}`}>
+                See it in the learner view
               </Link>
             </div>
           </div>
@@ -510,9 +581,9 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
                 </div>
               ))}
               {course.versions.length === 0 ? <div className="tiny muted">No versions yet.</div> : null}
-              <button className="btn btn-sm" type="button" style={{ marginTop: "2px" }} disabled title="Diff view lands in week 10">
-                Compare v{course.version - 1} → v{course.version}
-              </button>
+              <Link className="btn btn-sm" href={`/courses/${course.id}/versions`} style={{ marginTop: "2px", justifyContent: "center" }}>
+                {course.versions.length >= 2 ? `Compare v${course.version - 1} → v${course.version}` : "Version history"}
+              </Link>
             </div>
           </div>
 
@@ -521,8 +592,19 @@ export default async function CourseEditorPage({ params }: { params: Promise<{ i
               Next action
             </div>
             <div style={{ fontSize: "12.5px", marginTop: "6px", lineHeight: 1.6 }}>
-              9 learners have not reached Module 5. Schedule the wrap-up quiz as <b>in-class retrieval practice</b>{" "}
-              instead of homework.
+              {analytics.insight ? (
+                <>
+                  <b>{analytics.insight.headline}.</b> {analytics.insight.body.split(". ").slice(-1)[0]}
+                </>
+              ) : analytics.nudge.length > 0 ? (
+                <>
+                  <b>{analytics.nudge[0].name}</b> — {analytics.nudge[0].signal.toLowerCase()}.{" "}
+                  {analytics.nudge.length} learner{analytics.nudge.length === 1 ? "" : "s"} in this course have
+                  not finished; send a nudge from the insights screen.
+                </>
+              ) : (
+                <>Nothing is stuck. The next useful move is to publish the next version and let the cohort run.</>
+              )}
             </div>
           </div>
         </div>

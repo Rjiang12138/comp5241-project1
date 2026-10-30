@@ -1,8 +1,19 @@
 // Generated from prototype/index.html by tools/html_to_tsx.py.
 // Markup is copied verbatim from the mid-term prototype. Do not restyle here:
 // change prototype/css/styles.css and re-run the converter instead.
+//
+// Two edits since the port, both factual rather than visual: the dead
+// "Documentation" link is gone, and the floating completion card reads the live
+// number instead of the 76% the prototype hard-coded.
 
-export default function Landing() {
+type Live = {
+  courseTitle: string;
+  modules: number;
+  learners: number;
+  averageProgress: number;
+};
+
+export default function Landing({ live }: { live?: Live | null }) {
   return (
     <>
       <nav className="mk-nav">
@@ -14,15 +25,14 @@ export default function Landing() {
           <a href="/path">Self-directed paths</a>
         </div>
         <div className="mk-nav-right">
-          <a className="btn btn-ghost btn-sm" href="#">Documentation</a>
-          <a className="btn btn-sm" href="/learn">Sign in</a>
-          <a className="btn btn-primary btn-sm" href="/studio">Open prototype</a>
+          <a className="btn btn-ghost btn-sm" href="/login">Sign in</a>
+          <a className="btn btn-primary btn-sm" href="/studio">Open the studio</a>
         </div>
       </nav>
 
       <header className="mk-hero">
         <div>
-          <span className="pill pill-brand"><span className="dot"></span> COMP5241 · Prototype v1</span>
+          <span className="pill pill-brand"><span className="dot"></span> COMP5241 · Praxis</span>
           <h1>Turn lecture material into <em>interactive mini-courses</em>.</h1>
           <p className="mk-lede">
             Praxis is a GenAI course studio for software engineering education. Instructors bring a topic
@@ -35,7 +45,7 @@ export default function Landing() {
           </div>
           <div className="mk-note">
             <span className="pill pill-line">No sign-up</span>
-            Runs on static prototype data · built for the mid-term review
+            Runs on Postgres · pick a demo identity on the sign-in page
           </div>
         </div>
 
@@ -48,10 +58,10 @@ export default function Landing() {
             <div className="preview-body">
               <div className="preview-title">
                 <div>
-                  <div className="eyebrow">Draft outline</div>
-                  <strong style={{ fontSize: '14px' }}>Software Engineering Foundations</strong>
+                  <div className="eyebrow">{live ? "Live course" : "Draft outline"}</div>
+                  <strong style={{ fontSize: '14px' }}>{live?.courseTitle ?? "Software Engineering Foundations"}</strong>
                 </div>
-                <span className="pill pill-teal">5 modules</span>
+                <span className="pill pill-teal">{live ? `${live.modules} modules` : "5 modules"}</span>
               </div>
 
               <div className="preview-row">
@@ -94,9 +104,14 @@ export default function Landing() {
             </div>
           </div>
           <div className="float-card b" style={{ width: '150px' }}>
-            <div className="tiny muted">Cohort completion</div>
-            <div style={{ fontSize: '19px', fontWeight: '650', letterSpacing: '-.02em', margin: '1px 0 6px' }}>76%</div>
-            <div className="progress" style={{ height: '5px' }}><i style={{ width: '76%' }}></i></div>
+            <div className="tiny muted">Average progress</div>
+            <div style={{ fontSize: '19px', fontWeight: '650', letterSpacing: '-.02em', margin: '1px 0 6px' }}>
+              {live ? `${live.averageProgress}%` : "—"}
+            </div>
+            <div className="progress" style={{ height: '5px' }}><i style={{ width: `${live?.averageProgress ?? 0}%` }}></i></div>
+            <div className="tiny muted" style={{ marginTop: '4px' }}>
+              {live ? `${live.learners} enrolled` : "no course published"}
+            </div>
           </div>
         </div>
       </header>
@@ -133,7 +148,7 @@ export default function Landing() {
       </section>
 
       <div className="mk-strip">
-        <div><b>6 screens</b> in this prototype</div>
+        <div><b>9 screens</b> behind one sign-in</div>
         <div><b>3 roles</b> instructor · learner · admin</div>
         <div><b>GenAI</b> delegated, described, discerned, documented</div>
         <div style={{ marginLeft: 'auto' }} className="sm">PolyU · Education 4.0 · COMP5241 Software Engineering</div>
