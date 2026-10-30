@@ -158,6 +158,8 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-12 | Roster import was promised by `/admin` copy and did not exist | major | fixed | §8.8 |
 | D-13 | A roster learner's cookie fell back to the demo instructor, so the new role guard never fired | blocker | fixed | §8.9 — the session resolves any user id, not just the six the picker lists |
 | D-14 | A dropped connection to Postgres showed Next's bare "Application error" screen with a digest | major | fixed | §8.10 — an error boundary that names the cause and offers a retry |
+| D-15 | "Generate outline" answered 500 with `P2028` — the transaction exceeded its 5 s budget | blocker | fixed | §8.11 — one nested write instead of seventeen sequential inserts |
+| D-16 | A brief with no uploaded deck produced "No sections found in that material" | blocker | fixed | §8.11 — the brief is a source, and it is enough to call the model |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -539,3 +541,38 @@ and retries **once** on `P1001`/`P1002`/`P1017`.
 
 The retry is deliberately a single attempt. A loop would turn a real outage into
 a spinner, which is the failure mode this section exists to avoid.
+
+### 8.11 Generating a course: one transaction too long, one source too few
+
+Two defects sat behind the same button, and the first hid the second.
+
+**D-15 — the write outlived its transaction.** `createCourseFromOutline` opened an
+interactive transaction, created the course, then each module, then each activity,
+then the `AiRun` — seventeen sequential round trips to a database in another
+region. Prisma gives an interactive transaction five seconds. The tree took
+longer, so "Generate outline" answered `500` with `P2028` and left a half-written
+course behind. A nested `create` sends the same graph in one call: atomic without
+holding a transaction open across a dozen network hops. `savePath` had the same
+shape and was rewritten the same way; the three transactions that genuinely need
+to read-then-write now ask for 15 s instead of the default 5.
+
+**D-16 — the brief was not a source.** With no deck, `toHeadings("")` returns
+nothing, the model call is gated on "at least three sections" so it never ran, and
+the template had no headings to draft from. The screen says "Without one, the
+brief alone is enough to start"; the pipeline disagreed. The brief is now split
+into its sentences and used as the section seeds, and the three-section floor is
+waived for a brief — designing a sequence from an instruction is the job being
+asked for, whereas rewriting a two-heading handout invents more than it reads.
+
+| Check | Result |
+| --- | --- |
+| Brief only, no file, "Generate outline" | 5 modules · 10 activities · 45 min · `poolside/laguna-s-2.1:free` · 11.1 s · no `P2028` |
+| Generation log | "no file — starting from the brief", "2 sections · drawn from the brief", "Call language model" |
+| Explanation card | says the draft was written from the brief, not "from your slides" |
+| `/path` → "Design my path" | 4 steps · AI-sequenced · saved (nested create, same fix) |
+| Drafts created by the test | deleted afterwards; the course count is back to its seed value |
+
+The log line "modules reviewed against the source order" was also wrong when
+there was no source; it now says "against the order you described". Small, but
+this whole section exists because a screen said one thing and the code did
+another.

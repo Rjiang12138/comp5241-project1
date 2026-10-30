@@ -60,6 +60,8 @@ export async function generateCourseAction(_previous: StudioState, formData: For
   }
 
   // No material is a supported case, not an error: the brief is itself a source.
+  // It is passed as `brief` rather than disguised as a one-page "brief.md" file,
+  // so the generation log can say where the outline came from.
   if (docs.length === 0) {
     if (rejected.length > 0) {
       return {
@@ -67,7 +69,12 @@ export async function generateCourseAction(_previous: StudioState, formData: For
         message: `Could not read ${rejected.join(", ")}. Text-based PDFs work; scans need OCR.`,
       };
     }
-    docs.push({ name: "brief.md", pages: 1, text: brief });
+    if (brief.trim().length === 0) {
+      return {
+        status: "error",
+        message: "Nothing to work from: add a slide deck, or write a sentence about what learners should be able to do.",
+      };
+    }
   }
 
   const outline = await generateOutline(docs, { minutes, audience, title, brief });

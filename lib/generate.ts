@@ -121,6 +121,29 @@ function toHeadings(text: string): Heading[] {
   return headings.filter((heading) => heading.body.length > 0);
 }
 
+/**
+ * The brief is material too.
+ *
+ * With no deck uploaded the pipeline had nothing to read: `toHeadings("")` is
+ * empty, the model call is gated on "at least three sections" so it was skipped,
+ * and the template had no headings to draft from. "Generate outline" then
+ * answered "No sections found in that material" on a screen whose own copy says
+ * "Without one, the brief alone is enough to start". The brief is split into its
+ * sentences and the strongest ones become the section seeds, so both the model
+ * path and the template path have something to work with.
+ */
+function briefHeadings(brief: string, title: string): Heading[] {
+  const sentences = brief
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.replace(/^[-•*]\s*/, "").replace(/\s+/g, " ").trim())
+    .filter((sentence) => sentence.split(" ").length >= 3);
+
+  return sentences.slice(0, 5).map((sentence) => ({
+    title: trim(sentence.replace(/[.!?]+$/, ""), 70),
+    body: [sentence],
+  }));
+}
+
 /** Hands-on formats, ordered so a non-CS audience meets fewer code labs. */
 function handsOnFor(audience: "non_cs" | "cs" | "mixed", index: number): OutlineActivity["format"] {
   const nonCs: OutlineActivity["format"][] = ["simulation", "role_play", "quiz", "code_lab"];
@@ -367,15 +390,24 @@ export async function generateOutline(
   const combined = files.map((file) => file.text).join("\n");
   steps.push({
     label: "Parse source material",
-    detail: `${files.length} ${files.length === 1 ? "file" : "files"} · ${files.reduce((sum, file) => sum + file.pages, 0)} pages indexed`,
+    detail:
+      files.length === 0
+        ? "no file — starting from the brief"
+        : `${files.length} ${files.length === 1 ? "file" : "files"} · ${files.reduce((sum, file) => sum + file.pages, 0)} pages indexed`,
     ms: Date.now() - started,
   });
 
   started = Date.now();
   const headings = toHeadings(combined);
+  const brief = (options.brief ?? "").trim();
+  // No deck, but a brief: seed the outline from the brief's own sentences.
+  const seeds = headings.length >= 3 ? headings : brief ? briefHeadings(brief, options.title) : headings;
   steps.push({
     label: "Find section boundaries",
-    detail: `${headings.length} headings · ${combined.length.toLocaleString("en-GB")} characters`,
+    detail:
+      headings.length >= 3
+        ? `${headings.length} headings · ${combined.length.toLocaleString("en-GB")} characters`
+        : `${seeds.length} sections · drawn from the brief · ${brief.length.toLocaleString("en-GB")} characters`,
     ms: Date.now() - started,
   });
 
@@ -384,14 +416,20 @@ export async function generateOutline(
   let model = "template-v1";
   let template = true;
 
-  if (wantsModel && headings.length >= 3) {
+  // The three-section floor exists for decks: rewriting a two-heading handout
+  // into a course invents more than it reads. A brief is different — it is
+  // written as an instruction, and designing the sequence is the job being asked
+  // for — so one sentence is enough to call the model.
+  const fromBrief = headings.length < 3 && brief.length > 0;
+
+  if (wantsModel && (fromBrief || seeds.length >= 3)) {
     const call = await completeJson({
       system: SYSTEM_PROMPT,
-      user: userPrompt(headings, {
+      user: userPrompt(seeds, {
         minutes: options.minutes,
         audience: options.audience,
         title: options.title,
-        brief: options.brief ?? "",
+        brief,
       }),
     });
 
@@ -418,7 +456,7 @@ export async function generateOutline(
 
   if (modules.length === 0) {
     started = Date.now();
-    modules = draftFromHeadings(headings, options);
+    modules = draftFromHeadings(seeds, options);
     steps.push({
       label: "Draft module sequence",
       detail: `${modules.length} modules · ${options.minutes} min projected · template`,
@@ -440,7 +478,13 @@ export async function generateOutline(
 
   steps.push({
     label: "Check prerequisite order",
-    detail: template ? "modules follow the order of the source material" : "modules reviewed against the source order",
+    detail: template
+      ? fromBrief
+        ? "modules follow the order you described in the brief"
+        : "modules follow the order of the source material"
+      : fromBrief
+        ? "modules reviewed against the order you described"
+        : "modules reviewed against the source order",
     ms: 0,
   });
 

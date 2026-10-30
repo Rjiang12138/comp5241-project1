@@ -192,7 +192,7 @@ export async function removeModule(moduleId: string): Promise<void> {
     for (const [index, row] of remaining.entries()) {
       await tx.module.update({ where: { id: row.id }, data: { position: index + 1 } });
     }
-  });
+  }, { timeout: 15_000 });
 }
 
 export async function moveModule(moduleId: string, direction: -1 | 1): Promise<void> {
@@ -253,7 +253,7 @@ export async function removeActivity(activityId: string): Promise<void> {
     for (const [index, row] of remaining.entries()) {
       await tx.activity.update({ where: { id: row.id }, data: { position: index + 1 } });
     }
-  });
+  }, { timeout: 15_000 });
 }
 
 /** Publishing is a gate, not a toggle: it records a version row every time. */
@@ -297,7 +297,7 @@ export async function publishCourse(courseId: string): Promise<void> {
         snapshot: current ? (current as unknown as Prisma.InputJsonValue) : undefined,
       },
     });
-  });
+  }, { timeout: 15_000 });
 }
 
 export async function createCohort(input: {
@@ -338,59 +338,55 @@ export async function createCourseFromOutline(input: {
   model: string;
   outline: GeneratedOutline;
 }): Promise<string> {
-  return prisma.$transaction(async (tx) => {
-    const course = await tx.course.create({
-      data: {
-        title: input.title.trim() || "Untitled course",
-        brief: input.brief,
-        audience: input.audience,
-        minutes: input.minutes,
-        ownerId: input.ownerId,
-        status: "draft",
-      },
-      select: { id: true },
-    });
-
-    for (const [moduleIndex, module] of input.outline.modules.entries()) {
-      const created = await tx.module.create({
-        data: {
-          courseId: course.id,
+  // One nested write, not a loop inside an interactive transaction.
+  //
+  // The first version created the course, then each module, then each activity,
+  // then the AiRun — seventeen sequential round trips to a database in another
+  // region. Prisma's interactive transactions default to a five-second budget,
+  // and the tree took longer than that to write, so "Generate outline" answered
+  // 500 with P2028 while the draft was half-inserted. A nested create sends the
+  // same graph in one call: it is atomic without holding a transaction open
+  // across a dozen network hops.
+  const course = await prisma.course.create({
+    data: {
+      title: input.title.trim() || "Untitled course",
+      brief: input.brief,
+      audience: input.audience,
+      minutes: input.minutes,
+      ownerId: input.ownerId,
+      status: "draft",
+      modules: {
+        create: input.outline.modules.map((module, moduleIndex) => ({
           position: moduleIndex + 1,
           title: module.title,
           objective: module.objective,
           estimatedMinutes: module.estimatedMinutes,
-        },
-        select: { id: true },
-      });
-
-      for (const [activityIndex, activity] of module.activities.entries()) {
-        await tx.activity.create({
-          data: {
-            moduleId: created.id,
-            position: activityIndex + 1,
-            title: activity.title,
-            format: activity.format,
-            minutes: activity.minutes,
+          activities: {
+            create: module.activities.map((activity, activityIndex) => ({
+              position: activityIndex + 1,
+              title: activity.title,
+              format: activity.format,
+              minutes: activity.minutes,
+            })),
           },
-        });
-      }
-    }
-
-    await tx.aiRun.create({
-      data: {
-        purpose: "outline",
-        courseId: course.id,
-        // Which prompt produced this draft, so a later audit can tell a model
-        // draft from a template one without reading the course itself.
-        promptVersion: input.outline.template ? "template-v1" : "outline-json-v1",
-        model: input.model,
-        latencyMs: input.outline.steps.reduce((sum, step) => sum + step.ms, 0),
-        acceptedBy: input.ownerId,
+        })),
       },
-    });
-
-    return course.id;
+      aiRuns: {
+        create: {
+          purpose: "outline",
+          // Which prompt produced this draft, so a later audit can tell a model
+          // draft from a template one without reading the course itself.
+          promptVersion: input.outline.template ? "template-v1" : "outline-json-v1",
+          model: input.model,
+          latencyMs: input.outline.steps.reduce((sum, step) => sum + step.ms, 0),
+          acceptedBy: input.ownerId,
+        },
+      },
+    },
+    select: { id: true },
   });
+
+  return course.id;
 }
 
 /* --------------------------------------------------------------- learner */
@@ -1022,35 +1018,32 @@ export async function savePath(input: {
   model: string;
   steps: Array<{ title: string; detail: string; minutes: number; courseId: string | null }>;
 }): Promise<string> {
-  return prisma.$transaction(async (tx) => {
-    const path = await tx.learningPath.create({
-      data: {
-        userId: input.userId,
-        goal: input.goal,
-        domain: input.domain,
-        level: input.level,
-        hoursPerWeek: input.hoursPerWeek,
-        weeks: input.weeks,
-        model: input.model,
-      },
-      select: { id: true },
-    });
-
-    for (const [index, step] of input.steps.entries()) {
-      await tx.pathStep.create({
-        data: {
-          pathId: path.id,
+  // Nested create for the same reason as createCourseFromOutline: a path is
+  // one row plus a handful of steps, and a step-at-a-time loop inside a
+  // five-second interactive transaction is a timeout waiting to happen.
+  const path = await prisma.learningPath.create({
+    data: {
+      userId: input.userId,
+      goal: input.goal,
+      domain: input.domain,
+      level: input.level,
+      hoursPerWeek: input.hoursPerWeek,
+      weeks: input.weeks,
+      model: input.model,
+      steps: {
+        create: input.steps.map((step, index) => ({
           position: index + 1,
           title: step.title,
           detail: step.detail,
           minutes: step.minutes,
           courseId: step.courseId,
-        },
-      });
-    }
-
-    return path.id;
+        })),
+      },
+    },
+    select: { id: true },
   });
+
+  return path.id;
 }
 
 export async function setPathStepStatus(stepId: string, status: string): Promise<void> {

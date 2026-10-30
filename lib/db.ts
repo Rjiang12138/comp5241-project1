@@ -27,6 +27,19 @@ import { PrismaClient } from "@prisma/client";
  */
 const CONNECTION_LOST = new Set(["P1001", "P1002", "P1017"]);
 
+/**
+ * Errors that must never be retried, whatever else is going on.
+ *
+ * P2028 is Prisma's transaction timeout / already-closed error. Retrying it is
+ * pointless — the transaction is gone — and dropping the pool to do it takes
+ * every other in-flight query down with it. The generation path hit this on
+ * every "Generate outline": a five-second transaction spent on seventeen
+ * sequential inserts. That is fixed where it belongs (one nested write, see
+ * `createCourseFromOutline`); this guard makes sure a retry can never turn a
+ * transaction failure into a connection failure.
+ */
+const NEVER_RETRY = new Set(["P2028"]);
+
 function createClient(): PrismaClient {
   const base = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
@@ -47,7 +60,7 @@ function createClient(): PrismaClient {
           return await query(args);
         } catch (error) {
           const code = (error as { code?: string }).code;
-          if (!code || !CONNECTION_LOST.has(code)) throw error;
+          if (!code || NEVER_RETRY.has(code) || !CONNECTION_LOST.has(code)) throw error;
           await base.$disconnect().catch(() => {});
           return query(args);
         }

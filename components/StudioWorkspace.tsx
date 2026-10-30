@@ -67,6 +67,9 @@ export default function StudioWorkspace() {
   const totalMinutes = modules.reduce((sum, module) => sum + module.estimatedMinutes, 0);
   const pages = (outline?.sources ?? []).reduce((sum, source) => sum + source.pages, 0);
   const logMs = (outline?.steps ?? []).reduce((sum, step) => sum + step.ms, 0);
+  // No sources means the outline came from the brief alone, which changes what
+  // the explanation card below is allowed to claim.
+  const fromBrief = outline !== null && outline !== undefined && outline.sources.length === 0;
 
   const statusLine = outline
     ? `Draft ready · ${modules.length} modules · ${activityCount} activities · ${totalMinutes} min`
@@ -220,21 +223,31 @@ export default function StudioWorkspace() {
           <div style={{ fontSize: "12.4px", marginTop: "5px", lineHeight: "1.6" }}>
             {!outline ? (
               <>
-                The draft is generated from <b>your own material</b>. Module titles come from your slides, and nothing
-                leaves the machine except the titles and first lines sent to the model, if one is configured.
+                The draft is generated from <b>your own material</b> — a deck, or the brief if you have none. Module
+                titles come from what you supplied, and nothing leaves the machine except those titles and first lines,
+                if a model is configured.
               </>
             ) : outline.template ? (
-              <>
-                This draft is <b>template-based</b>: titles come from your slides, objectives from the first line under
-                each title, and minutes are split across whatever you asked for. No text was invented — which is why it
-                reads like an index of the deck. Add a key to let a model design the sequence instead.
-              </>
+              fromBrief ? (
+                <>
+                  This draft is <b>template-based</b>: the modules are cut from the sentences of your brief, objectives
+                  repeat what you asked for, and the minutes are split across the length you chose. No text was
+                  invented — which is why it reads like an outline of your own sentence rather than a designed course.
+                  Add a key to let a model design the sequence instead.
+                </>
+              ) : (
+                <>
+                  This draft is <b>template-based</b>: titles come from your slides, objectives from the first line
+                  under each title, and minutes are split across whatever you asked for. No text was invented — which
+                  is why it reads like an index of the deck. Add a key to let a model design the sequence instead.
+                </>
+              )
             ) : (
               <>
-                This draft was written by <b>{outline.model}</b> from the titles and first lines of your material. It
-                was validated before saving: formats are checked against the allowed set, and minutes are rescaled so
-                each module adds up. Check the objectives before you publish — the model has not read your slides in
-                full.
+                This draft was written by <b>{outline.model}</b> from {fromBrief ? "your brief" : "the titles and first lines of your material"}.
+                It was validated before saving: formats are checked against the allowed set, and minutes are rescaled
+                so each module adds up. Check the objectives before you publish — the model has not read your material
+                in full.
               </>
             )}
           </div>
