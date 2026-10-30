@@ -134,6 +134,21 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 
 | ID | Found by | Severity | Status | Fixed in |
 | --- | --- | --- | --- | --- |
+| D-01 | `curl` POST to `/path` returned 200 with an empty `LearningPath` table | blocker | fixed | §8.7 — the prototype script owned the click |
+| D-02 | `/learn` "Complete and continue" left `events` unchanged | blocker | fixed | §8.5 — the button was disabled by a state the test had not set |
+| D-03 | `/insights` 7-day view reported "0 of 24 finished every activity" | major | fixed | §8.6 — progress is a state, not a window |
+| D-04 | `/insights` median attempts read 0.0 | major | fixed | §8.6 — attempts keyed by enrolment + activity |
+| D-05 | `/insights` blamed quizzes for a drop that was positional | major | fixed | §8.6 — position measured before difficulty is claimed |
+| D-06 | Preview learner changed identity on every save | major | fixed | §8.5 — pinned in a cookie |
+| D-07 | Hint button ignored the pacing rule the page described | major | fixed | §8.5 — threshold enforced per track |
+| D-08 | "Assign" on `/admin` wrote the row but the select kept the old instructor | major | fixed | keyed the control so it re-mounts with the saved value |
+| D-09 | `/courses/[id]` audience and format selects had the same stale-value bug | major | fixed | same fix, same commit |
+| D-10 | `/courses/[id]` printed four statistics and a learner table that were fixtures | blocker | fixed | §8.8 — computed from `events` |
+| D-11 | "Export CSV" and "Compare vN → vN+1" were disabled placeholders | minor | fixed | §8.8 — real routes |
+| D-12 | Roster import was promised by `/admin` copy and did not exist | major | fixed | §8.8 |
+
+D-01 and D-02 are the same defect twice: a test that trusted the screen instead
+of the database. Both were found by reading the table, not the toast.
 
 A defect is only "fixed" when the case that found it passes on the preview URL,
 not when the code is merged.

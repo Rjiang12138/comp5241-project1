@@ -85,7 +85,18 @@ export default async function AdminPage() {
                   <td>
                     <form action={assignInstructorAction} className="row">
                       <input type="hidden" name="cohortId" value={cohort.id} />
-                      <select className="select" name="instructorId" defaultValue={cohort.instructorId} style={{ width: "150px", height: "30px", padding: "0 9px", fontSize: "12.5px" }} aria-label={`Instructor for ${cohort.code}`}>
+                      {/* Keyed by the current value: an uncontrolled select keeps
+                          the value it mounted with, so after "Assign" the row
+                          went on showing the previous instructor and the write
+                          looked like it had failed. */}
+                      <select
+                        key={`${cohort.id}:${cohort.instructorId}`}
+                        className="select"
+                        name="instructorId"
+                        defaultValue={cohort.instructorId}
+                        style={{ width: "150px", height: "30px", padding: "0 9px", fontSize: "12.5px" }}
+                        aria-label={`Instructor for ${cohort.code}`}
+                      >
                         {instructorOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}

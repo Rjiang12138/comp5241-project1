@@ -300,6 +300,7 @@ export default async function CourseEditorPage({
                                 <input type="hidden" name="title" value={activity.title} />
                                 <input type="hidden" name="minutes" value={activity.minutes} />
                                 <AutoSubmitSelect
+                                  key={`fmt:${activity.id}:${activity.format}`}
                                   name="format"
                                   defaultValue={activity.format}
                                   options={formatOptions}
@@ -499,7 +500,16 @@ export default async function CourseEditorPage({
                 </div>
                 <div className="field">
                   <label htmlFor="audience">Audience</label>
-                  <select className="select" id="audience" name="audience" defaultValue={course.audience}>
+                  {/* Keyed so the control re-mounts with the saved value. An
+                      uncontrolled select keeps the value it mounted with, which
+                      makes a successful save look like a no-op. */}
+                  <select
+                    key={`audience:${course.audience}`}
+                    className="select"
+                    id="audience"
+                    name="audience"
+                    defaultValue={course.audience}
+                  >
                     <option value="mixed">Mixed cohort</option>
                     <option value="non_cs">Non-CS majors</option>
                     <option value="cs">CS graduates</option>
