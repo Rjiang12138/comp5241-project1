@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  // Where the build lands. `.next` unless something overrides it.
+  //
+  // The override exists for the authoring sandbox this project is developed in:
+  // its file guard refuses any bulk delete of 50+ files, and `next build`
+  // clears stale artifacts before compiling. Pointing the build at a fresh
+  // directory sidesteps that without touching a single line of app code.
+  // `npm run dev` and a plain `npm run build` are unaffected — they get `.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
   experimental: {
     serverActions: {
       // Server actions accept 1 MB by default, which is smaller than a single

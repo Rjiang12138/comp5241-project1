@@ -8,6 +8,9 @@ Thumbs.db
 # Node (week 9 onwards)
 node_modules/
 .next/
+.next-*/
+.next.*/
+.trash-*/
 out/
 dist/
 *.log

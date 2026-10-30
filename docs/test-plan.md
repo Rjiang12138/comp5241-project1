@@ -157,6 +157,7 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-11 | "Export CSV" and "Compare vN → vN+1" were disabled placeholders | minor | fixed | §8.8 — real routes |
 | D-12 | Roster import was promised by `/admin` copy and did not exist | major | fixed | §8.8 |
 | D-13 | A roster learner's cookie fell back to the demo instructor, so the new role guard never fired | blocker | fixed | §8.9 — the session resolves any user id, not just the six the picker lists |
+| D-14 | A dropped connection to Postgres showed Next's bare "Application error" screen with a digest | major | fixed | §8.10 — an error boundary that names the cause and offers a retry |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -491,3 +492,26 @@ sharing an answer.
 A guard is only verified when the test signs in as the role being refused. A
 guard tested as an instructor proves nothing — it is the same mistake as D-01,
 trusting the screen instead of the state behind it.
+
+### 8.10 A lost connection is a state, not a framework error
+
+Opening the app while the Postgres branch was unreachable produced Next's own
+"Application error: a server-side exception has occurred" and a digest. The
+digest is useful to me and useless to the person reading it: it does not say
+whether their progress is gone, whether they did something wrong, or whether
+waiting would help.
+
+Every screen here is a query, so there is no cached copy to fall back on — the
+honest answer is "the data is not here right now". `app/error.tsx` says that,
+names the cause when it recognises one (`P1001`, `Can't reach database`,
+`ECONNREFUSED`), keeps the digest for support, and offers a retry as the primary
+action, because the usual cause is a suspended branch waking up.
+
+| Check | Result |
+| --- | --- |
+| `DATABASE_URL` pointed at a dead host, `/` opened in a browser | "The database did not answer", cause line, digest, **Try again** |
+| Real database, same build | normal landing page |
+| Unknown route | `app/not-found.tsx` — "No such page", links back to courses |
+
+Verified by running a second instance on port 3124 against an unreachable
+database, not by reading the component.
