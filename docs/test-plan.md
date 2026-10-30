@@ -515,3 +515,27 @@ action, because the usual cause is a suspended branch waking up.
 
 Verified by running a second instance on port 3124 against an unreachable
 database, not by reading the component.
+
+Two things came out of testing it in a production build rather than in dev:
+
+**The message is redacted.** Next replaces the error text with "An error occurred
+in the Server Components render" in a production build, so the first version of
+the boundary — which chose its wording by matching `P1001` in `error.message` —
+showed its generic sentence in exactly the build a reader would be using. The
+specific "The database did not answer" branch only ever appeared in development.
+The copy now names the database as the likely cause without asserting it, and the
+detail box says the message is redacted instead of printing Next's placeholder.
+
+**The pool does not heal itself.** Neon closes its side of an idle pooled
+connection; Prisma keeps the socket and every later query fails with `P1001`
+while the database is healthy — the state this app sat in twice, with a one-off
+script answering from the same URL in two seconds. `lib/db.ts` now drops the pool
+and retries **once** on `P1001`/`P1002`/`P1017`.
+
+| Check | Result |
+| --- | --- |
+| One request against an unreachable host | two "can't reach database server" attempts in the log, then the boundary — the retry fires, does not loop, does not swallow |
+| Normal database, same build | seven routes, all `200`, no `prisma:error` |
+
+The retry is deliberately a single attempt. A loop would turn a real outage into
+a spinner, which is the failure mode this section exists to avoid.

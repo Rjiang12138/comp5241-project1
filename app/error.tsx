@@ -5,14 +5,22 @@
  *
  * Every screen in this app is a query — progress is read from `events`, the
  * cohort table from enrolments, the editor from the course tree. There is no
- * cached copy to fall back on, so when Postgres cannot be reached the honest
- * answer is "the data is not here right now", not a blank card with zeros.
+ * cached copy to fall back on, so when the read fails the honest answer is "the
+ * data is not here right now", not a blank card full of zeros.
  *
- * That happens for ordinary reasons: the Neon branch suspends after a few idle
- * minutes, and the first request after that can time out while the compute
- * wakes. A second attempt usually works, which is why the primary action is a
- * retry rather than a reload of the whole app.
+ * One wrinkle worth recording: production builds redact the error message
+ * ("The specific message is omitted in production builds"), so recognising a
+ * dropped connection by reading `P1001` out of it only works in development.
+ * The copy below therefore names the database as the likely cause without
+ * claiming to know, and keeps the specific branch for when the message survives.
+ * An earlier version asserted "The database did not answer" only inside that
+ * branch — which meant the sentence users actually needed never appeared in the
+ * build they were using.
  */
+const REDACTED = /Server Components render/i;
+
+const CONNECTION_LOST = /P1001|P1002|P1017|Can't reach database|ECONNREFUSED|ETIMEDOUT|fetch failed/i;
+
 export default function RouteError({
   error,
   reset,
@@ -20,9 +28,9 @@ export default function RouteError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const offline = /P1001|Can't reach database|ECONNREFUSED|ETIMEDOUT|fetch failed/i.test(
-    `${error.message}`,
-  );
+  const message = error.message ?? "";
+  const redacted = REDACTED.test(message);
+  const offline = CONNECTION_LOST.test(message);
 
   return (
     <div className="signin-wrap">
@@ -38,7 +46,7 @@ export default function RouteError({
           <p className="muted" style={{ fontSize: "13px", lineHeight: 1.6 }}>
             {offline
               ? "Praxis reads everything live — there is no cached copy of your progress to show instead. The Postgres branch is probably still waking up, or the network dropped. Trying again usually works."
-              : "Something threw while this page was being rendered. The detail is below; nothing was written to the database."}
+              : "Nothing was written, and your progress is safe. Every screen here is read live from Postgres, so there is no cached copy to fall back on: either the database did not answer — the branch may still be waking up — or something threw while the page was rendering. Trying again is the first thing to try."}
           </p>
 
           <div
@@ -55,10 +63,17 @@ export default function RouteError({
               wordBreak: "break-word",
             }}
           >
-            {offline
-              ? "PrismaClientKnownRequestError · P1001 · Can't reach database server"
-              : error.message.slice(0, 240)}
-            {error.digest ? <div className="tiny muted" style={{ marginTop: "6px" }}>digest {error.digest}</div> : null}
+            {redacted ? (
+              <>
+                Server-side exception · message redacted in this build
+                {error.digest ? <div style={{ marginTop: "6px" }}>digest {error.digest}</div> : null}
+              </>
+            ) : (
+              <>
+                {message.slice(0, 240) || "No message"}
+                {error.digest ? <div style={{ marginTop: "6px" }}>digest {error.digest}</div> : null}
+              </>
+            )}
           </div>
 
           <div className="row" style={{ marginTop: "16px", gap: "8px" }}>
