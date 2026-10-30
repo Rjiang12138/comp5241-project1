@@ -7,10 +7,17 @@ one-paragraph brief; Praxis drafts the module sequence, builds the activities (c
 stakeholder simulations), and adapts the wording to each learner's background. Learners get a path,
 not a playlist — they can also generate their own.
 
-> **Status: week 9 — the app exists, the pipeline does not.**
-> The Next.js application runs, with a working course editor, a minimal admin
-> console and role-based sessions. The learner runtime, the generation pipeline
-> and the analytics are still the week 8 prototype, mounted at the same routes.
+> **Status: the platform runs end to end.**
+> A deck or a brief goes in at `/studio`, a course comes out, learners play it at
+> `/learn`, and every click writes an `Event` that `/insights` and the course
+> editor read back. Progress, attempts, cohort tables, CSV export and version
+> diffs are queries over that log — none of them are fixtures. Roles are enforced
+> on the server (`requireStaff` / `requireRole`), not in the sidebar.
+>
+> Two activity formats are modelled but not built: mini-games and narrated
+> slides. The screens say so instead of showing an empty card. Language switching
+> is English-only for the same reason — it is stated, not implied.
+>
 > The mid-term prototype is untouched in [`prototype/`](prototype) and remains
 > the visual reference for every screen.
 
@@ -35,12 +42,13 @@ Data lives in a Neon Postgres branch. You land as **Dr. R. Kwok** (instructor);
 | Route | What it is | Owner |
 | --- | --- | --- |
 | `/` | landing | R1 |
-| `/studio` | instructor authoring (prototype) | R4 |
+| `/studio` | **upload a deck, get a course** — audience, length, generation log | R4 |
 | `/courses` | course list | R3 |
-| `/courses/[id]` | **course editor** — modules, activities, ordering, publishing, versions | R3 |
-| `/learn` | learner code lab (prototype) | R2 |
-| `/insights` | cohort analytics (prototype) | R4 |
-| `/path` | self-directed path builder (prototype) | R5 |
+| `/courses/[id]` | **course editor** — modules, activities, ordering, publishing, versions, cohort stats, roster import, CSV export | R3 |
+| `/courses/[id]/versions` | version diff, only where a snapshot was written | R3 |
+| `/learn` | **learner runtime** — eight activity formats, hints, tutor, checkpoints | R2 |
+| `/insights` | cohort analytics over the event log | R4 |
+| `/path` | self-directed path builder | R5 |
 | `/admin` | **cohorts and teaching assignments** | R3 |
 | `/login` | role switch | R3 |
 

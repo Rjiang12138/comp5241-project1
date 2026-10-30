@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role, User } from "./types";
-import { listSignableUsers } from "./store";
+import { getUserById, listSignableUsers } from "./store";
 
 /**
  * Session handling.
@@ -56,11 +56,16 @@ export async function getSession(): Promise<Session> {
   // session behind it can actually be a learner. The default is still the
   // instructor the prototype was drawn around, so a reviewer who opens the app
   // cold lands in the staff shell.
+  if (!uid) return toSession(await demoUser());
+  // Any id resolves, not just the six the picker offers — see getUserById.
+  const match = await getUserById(uid);
+  return toSession(match ?? (await demoUser()));
+}
+
+/** The signed-in-by-default identity, used for a cold visit and a stale cookie. */
+async function demoUser(): Promise<User> {
   const users = await listSignableUsers();
-  const fallback = users.find((u) => u.id === DEMO_INSTRUCTOR) ?? users[0];
-  if (!uid) return toSession(fallback);
-  const match = users.find((u) => u.id === uid);
-  return toSession(match ?? fallback);
+  return users.find((u) => u.id === DEMO_INSTRUCTOR) ?? users[0];
 }
 
 /**

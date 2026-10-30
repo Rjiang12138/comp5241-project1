@@ -1097,6 +1097,19 @@ export async function listSignableUsers(): Promise<User[]> {
 }
 
 /**
+ * Resolve any user id, not only the six the sign-in page offers.
+ *
+ * The session cookie can legitimately name a roster learner (`u-gen-*`): the
+ * preview pin picks exactly those, and an imported roster keeps growing. If the
+ * lookup were restricted to the picker, those sessions would silently fall back
+ * to the demo instructor — a learner would read the staff shell and the role
+ * guard would never fire.
+ */
+export async function getUserById(id: string): Promise<User | null> {
+  return prisma.user.findUnique({ where: { id } });
+}
+
+/**
  * Which learner an instructor's "preview as learner" lands on.
  *
  * The first enrolment of the course, in fixture order, so the preview is stable

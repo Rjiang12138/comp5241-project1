@@ -156,6 +156,7 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-10 | `/courses/[id]` printed four statistics and a learner table that were fixtures | blocker | fixed | §8.8 — computed from `events` |
 | D-11 | "Export CSV" and "Compare vN → vN+1" were disabled placeholders | minor | fixed | §8.8 — real routes |
 | D-12 | Roster import was promised by `/admin` copy and did not exist | major | fixed | §8.8 |
+| D-13 | A roster learner's cookie fell back to the demo instructor, so the new role guard never fired | blocker | fixed | §8.9 — the session resolves any user id, not just the six the picker lists |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -464,3 +465,29 @@ The roster import exists because the admin screen has claimed "students import
 themselves from a Moodle roster or CSV, driven from the course page" since week
 8, and until now there was no such control. Either the sentence goes or the
 control does; the control was cheaper than the apology.
+
+### 8.9 The role guard has to be tested as the role it guards
+
+Adding `requireStaff()` turned the shell into a promise: a learner cannot open the
+editor. The first probe sent `Cookie: praxis_uid=u-gen-2` and got `200` on
+`/courses` — not because the guard was missing, but because `getSession()` looked
+the id up in `listSignableUsers()`, which deliberately lists six names for the
+picker. A roster learner was not in that list, so the cookie resolved to
+Dr. R. Kwok and every staff route stayed open.
+
+| Request | Before | After |
+| --- | --- | --- |
+| `u-gen-2` → `/courses` | `200`, staff shell, `session.role = instructor` | `307 → /learn` |
+| `u-gen-2` → `/insights` | `200`, staff shell | `307 → /learn` |
+| `u-gen-2` → `/admin` | `200 → /login` (wrong destination, right refusal) | `307 → /learn` |
+| `u-tse` (admin) → `/admin` | `200` | `200` |
+| `u-kwok` (instructor) → `/admin` | `200 → /login` | `307 → /login` |
+
+The fix is one line of intent: the session resolves *any* user id
+(`getUserById`), while the sign-in page keeps its short list
+(`listSignableUsers`). Identity and menu are different questions and were
+sharing an answer.
+
+A guard is only verified when the test signs in as the role being refused. A
+guard tested as an instructor proves nothing — it is the same mistake as D-01,
+trusting the screen instead of the state behind it.
