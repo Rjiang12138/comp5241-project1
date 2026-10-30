@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
-import { getSession } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { courseVersions, getCourse } from "@/lib/store";
 import { diffSnapshots, parseSnapshot } from "@/lib/versions";
 
@@ -33,7 +33,7 @@ export default async function VersionsPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const session = await getSession();
+  const session = await requireStaff();
   const course = await getCourse(id);
   if (!course) notFound();
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
-import { getSession } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { audienceLabel, statusLabel, statusPill } from "@/lib/format";
 import { cohortsHref } from "@/lib/nav";
 import { listCourses } from "@/lib/store";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "My courses — Praxis" };
 
 export default async function CoursesPage() {
-  const session = await getSession();
+  const session = await requireStaff();
   const courses = await listCourses();
   const cohorts = new Set(courses.map((c) => c.cohortId).filter(Boolean)).size;
 

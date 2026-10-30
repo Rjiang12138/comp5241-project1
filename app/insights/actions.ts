@@ -1,5 +1,7 @@
 "use server";
 
+import { requireStaff } from "@/lib/auth";
+
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { courseAnalytics, nudgeLearner } from "@/lib/store";
@@ -14,6 +16,7 @@ import { courseAnalytics, nudgeLearner } from "@/lib/store";
  */
 
 export async function nudgeAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = String(formData.get("courseId") ?? "");
   const userId = String(formData.get("userId") ?? "");
   if (!courseId || !userId) return;
@@ -23,6 +26,7 @@ export async function nudgeAction(formData: FormData): Promise<void> {
 
 /** Nudge everyone currently on the list — one event each, not a broadcast. */
 export async function nudgeAllAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = String(formData.get("courseId") ?? "");
   if (!courseId) return;
   const analytics = await courseAnalytics(courseId, null);
@@ -33,6 +37,7 @@ export async function nudgeAllAction(formData: FormData): Promise<void> {
 }
 
 export async function dismissInsightAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = String(formData.get("courseId") ?? "");
   const jar = await cookies();
   jar.set(`praxis_insight_${courseId}`, "dismissed", {
@@ -45,6 +50,7 @@ export async function dismissInsightAction(formData: FormData): Promise<void> {
 }
 
 export async function restoreInsightAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = String(formData.get("courseId") ?? "");
   const jar = await cookies();
   jar.delete(`praxis_insight_${courseId}`);

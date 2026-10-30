@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { Shell } from "@/components/Shell";
-import { getSession } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { courseAnalytics, courseWithMostLearners, listCourses } from "@/lib/store";
 import { dismissInsightAction, nudgeAction, nudgeAllAction, restoreInsightAction } from "./actions";
 
@@ -57,7 +57,7 @@ function chart(values: number[]) {
 
 export default async function InsightsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
-  const session = await getSession();
+  const session = await requireStaff();
   const [courses, busiest] = await Promise.all([listCourses(), courseWithMostLearners()]);
 
   const course =

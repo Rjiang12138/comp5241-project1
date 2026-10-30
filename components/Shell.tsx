@@ -92,25 +92,40 @@ export function Sidebar({ session, active, courseCount }: { session: Session; ac
         <span className="logo-mark sm">P</span> Praxis <span className="pill pill-line">beta</span>
       </div>
       <nav className="side-nav">
-        <NavLink name="studio" href="/studio" label="Studio" active={active === "studio"} />
-        <NavLink name="courses" href="/courses" label="My courses" active={active === "courses" || active === "cohorts"} count={courseCount ? String(courseCount) : undefined} />
-        <NavLink name="insights" href="/insights" label="Insights" active={active === "insights"} />
-        {/* In the prototype "Cohorts" pointed at course.html, so it opened the
-            catalogue instead of a cohort screen. cohortsHref() decides where it
-            goes per role; see lib/nav.ts. */}
-        <NavLink
-          name="cohorts"
-          href={cohortsHref(session)}
-          label="Cohorts"
-          active={false}
-          count="2"
-        />
+        {/* A learner sees a learner's sidebar. Hiding the staff links is not the
+            access control — every staff route calls requireStaff() on the server
+            — but a menu full of doors that open onto a redirect is its own kind
+            of lie. */}
+        {session.role === "learner" ? (
+          <>
+            <NavLink name="preview" href="/learn" label="My learning" active={active === "preview"} />
+            <NavLink name="paths" href="/path" label="My path" active={active === "paths"} />
+            <div className="side-label">Account</div>
+            <NavLink name="settings" href="/settings" label="Settings" active={active === "settings"} />
+          </>
+        ) : (
+          <>
+            <NavLink name="studio" href="/studio" label="Studio" active={active === "studio"} />
+            <NavLink name="courses" href="/courses" label="My courses" active={active === "courses" || active === "cohorts"} count={courseCount ? String(courseCount) : undefined} />
+            <NavLink name="insights" href="/insights" label="Insights" active={active === "insights"} />
+            {/* In the prototype "Cohorts" pointed at course.html, so it opened the
+                catalogue instead of a cohort screen. cohortsHref() decides where it
+                goes per role; see lib/nav.ts. */}
+            <NavLink
+              name="cohorts"
+              href={cohortsHref(session)}
+              label="Cohorts"
+              active={false}
+              count="2"
+            />
 
-        <div className="side-label">Workspace</div>
-        <NavLink name="paths" href="/path" label="Learner paths" active={active === "paths"} />
-        <NavLink name="preview" href="/learn" label="Preview as learner" active={active === "preview"} />
-        <NavLink name="settings" href="/settings" label="Settings" active={active === "settings"} />
-        {session.role === "admin" ? <NavLink name="admin" href="/admin" label="Admin" active={active === "admin"} /> : null}
+            <div className="side-label">Workspace</div>
+            <NavLink name="paths" href="/path" label="Learner paths" active={active === "paths"} />
+            <NavLink name="preview" href="/learn" label="Preview as learner" active={active === "preview"} />
+            <NavLink name="settings" href="/settings" label="Settings" active={active === "settings"} />
+            {session.role === "admin" ? <NavLink name="admin" href="/admin" label="Admin" active={active === "admin"} /> : null}
+          </>
+        )}
       </nav>
       <div className="side-foot">
         <Link className="side-user" href="/login">

@@ -1,3 +1,4 @@
+import { getSession } from "@/lib/auth";
 import { getCourse, learnerProgress } from "@/lib/store";
 
 /**
@@ -14,6 +15,9 @@ function escape(value: string | number): string {
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  const session = await getSession();
+  if (session.role === "learner") return new Response("Forbidden", { status: 403 });
+
   const { id } = await context.params;
   const course = await getCourse(id);
   if (!course) return new Response("Unknown course", { status: 404 });

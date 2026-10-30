@@ -50,8 +50,8 @@ export default async function SettingsPage({
         </>
       }
       actions={
-        <Link className="btn btn-sm" href="/courses">
-          Back to courses
+        <Link className="btn btn-sm" href={session.role === "learner" ? "/learn" : "/courses"}>
+          {session.role === "learner" ? "Back to my learning" : "Back to courses"}
         </Link>
       }
     >

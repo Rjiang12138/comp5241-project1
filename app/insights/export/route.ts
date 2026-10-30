@@ -1,3 +1,4 @@
+import { getSession } from "@/lib/auth";
 import { courseAnalytics, getCourse } from "@/lib/store";
 
 /**
@@ -14,6 +15,11 @@ function escape(value: string | number): string {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  const session = await getSession();
+  // A route handler has no page to redirect from, so this is a 403 rather than
+  // the redirect requireStaff() performs.
+  if (session.role === "learner") return new Response("Forbidden", { status: 403 });
+
   const url = new URL(request.url);
   const courseId = url.searchParams.get("course") ?? "";
   const raw = url.searchParams.get("range") ?? "all";

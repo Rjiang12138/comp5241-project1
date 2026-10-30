@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/lib/auth";
+import { getSession, requireStaff } from "@/lib/auth";
 import { generateOutline, readSource, type SourceDoc } from "@/lib/generate";
 import { createCourseFromOutline } from "@/lib/store";
 import type { StudioState } from "./state";
@@ -22,6 +22,7 @@ import type { StudioState } from "./state";
 const MAX_BYTES = 12 * 1024 * 1024;
 
 export async function generateCourseAction(_previous: StudioState, formData: FormData): Promise<StudioState> {
+  await requireStaff();
   const session = await getSession();
   if (session.role === "learner") {
     return { status: "error", message: "Only instructors and admins can generate a course." };

@@ -38,6 +38,8 @@ type Props = {
   learnerName: string;
   learnerBackground: "cs" | "non_cs";
   preview: boolean;
+  /** Where the exit arrow goes. Staff return to the editor; a learner to their path. */
+  exitHref?: string;
   /** Present only for staff: switches which learner the preview is running as. */
   cyclePreview?: (formData: FormData) => void;
   activity: PlayerActivity;
@@ -86,6 +88,7 @@ export default function LearnPlayer(props: Props) {
     learnerName,
     learnerBackground,
     preview,
+    exitHref,
     cyclePreview,
     activity,
     content,
@@ -195,7 +198,7 @@ export default function LearnPlayer(props: Props) {
   return (
     <>
       <div className="player-top">
-        <a className="exit" href={`/courses/${courseId}`} title="Back to course">
+        <a className="exit" href={exitHref ?? `/courses/${courseId}`} title="Back">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M15 5l-7 7 7 7" /></svg>
         </a>
         <div>

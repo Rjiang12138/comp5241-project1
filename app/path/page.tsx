@@ -50,7 +50,9 @@ export default async function PathPage({ searchParams }: { searchParams: Promise
         </div>
         <div style={{ marginLeft: "auto" }} className="row">
           <a className="btn btn-sm" href="/learn">Resume last course</a>
-          <a className="btn btn-sm" href="/courses">Instructor view</a>
+          {session.role === "learner" ? null : (
+            <a className="btn btn-sm" href="/courses">Instructor view</a>
+          )}
           <span className="avatar">{session.initials}</span>
         </div>
       </div>

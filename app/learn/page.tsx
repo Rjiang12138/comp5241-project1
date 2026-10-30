@@ -73,6 +73,7 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
       learnerName={view.learner.name}
       learnerBackground={view.learner.background}
       preview={preview}
+      exitHref={preview ? `/courses/${view.course.id}` : "/path"}
       cyclePreview={preview ? cyclePreviewAction : undefined}
       activity={{
         id: current.activity.id,
@@ -110,7 +111,7 @@ async function EmptyState({ learnerName, preview }: { learnerName: string; previ
   return (
     <>
       <div className="player-top">
-        <a className="exit" href="/courses" title="Back to courses">
+        <a className="exit" href={preview ? "/courses" : "/path"} title="Back">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M15 5l-7 7 7 7" /></svg>
         </a>
         <div>

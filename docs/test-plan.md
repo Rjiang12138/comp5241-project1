@@ -69,9 +69,19 @@ Status legend: **P** pass · **F** fail (see defect log) · **—** not written 
 
 | ID | Requirement | Scenario | Expected | Level | Status |
 | --- | --- | --- | --- | --- | --- |
-| AU-01 | R3 | No cookie, open `/courses` | Renders as the demo instructor | e2e | — |
-| AU-02 | R3 | Sign in as admin, then open `/courses` | Sidebar shows Admin, name updates | e2e | — |
-| AU-03 | R3 | Sign out | Cookie cleared, `/login` renders | e2e | — |
+| AU-01 | R3 | No cookie, open `/courses` | Renders as the demo instructor | e2e | pass |
+| AU-02 | R3 | Sign in as admin, then open `/courses` | Sidebar shows Admin, name updates | e2e | pass |
+| AU-03 | R3 | Sign out | Cookie cleared, `/login` renders | e2e | pass |
+| AU-04 | R3 | Learner opens `/courses`, `/studio`, `/insights`, `/courses/[id]`, `/courses/[id]/versions` | 307 → `/learn`, not `/login` — they are signed in, the page is just not theirs | e2e | pass |
+| AU-05 | R3 | Learner opens `/learn`, `/path`, `/settings` | 200 | e2e | pass |
+| AU-06 | R3 | Learner sidebar | "My learning · My path · Settings" — no Studio, no Cohorts, no Insights | e2e | pass |
+| AU-07 | R3 | Learner requests `/insights/export` or `/courses/[id]/export` | 403 (a route handler has no page to redirect from) | api | pass |
+| AU-08 | R3 | Instructor opens `/admin` | 307 → `/login`; the sidebar sends instructors to their course instead | e2e | pass |
+| AU-09 | R3 | Learner POSTs a course-editor action directly | `requireStaff()` throws the redirect before the write | api | pass |
+
+Hiding a link is not access control: AU-04 and AU-07 are enforced on the server,
+and AU-06 is only there because a menu of doors that open onto a redirect is its
+own kind of lie.
 
 ### 3.4 Deployment smoke (run on the preview URL, every merge)
 

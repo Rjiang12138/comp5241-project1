@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AutoSubmitInput, { AutoSubmitSelect } from "@/components/AutoSubmitInput";
 import { Shell } from "@/components/Shell";
-import { getSession } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { FORMATS, audienceLabel, formatLabel, formatPill, statusLabel, statusPill } from "@/lib/format";
 import { courseAnalytics, courseMinutes, getCourse, learnerProgress } from "@/lib/store";
 import {
@@ -67,7 +67,7 @@ export default async function CourseEditorPage({
   const { id } = await params;
   const query = await searchParams;
   const added = Number(query.roster) || 0;
-  const session = await getSession();
+  const session = await requireStaff();
   const course = await getCourse(id);
   if (!course) notFound();
 

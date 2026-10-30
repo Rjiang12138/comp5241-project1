@@ -1,5 +1,7 @@
 "use server";
 
+import { requireStaff } from "@/lib/auth";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -40,6 +42,7 @@ function refresh(courseId: string): void {
 }
 
 export async function saveCourseAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   const audience = str(formData, "audience");
   await updateCourse(courseId, {
@@ -52,18 +55,21 @@ export async function saveCourseAction(formData: FormData): Promise<void> {
 }
 
 export async function addModuleAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await addModule(courseId, str(formData, "title"));
   refresh(courseId);
 }
 
 export async function renameModuleAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await updateModule(str(formData, "moduleId"), { title: str(formData, "title") });
   refresh(courseId);
 }
 
 export async function moveModuleAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   const direction = str(formData, "direction") === "up" ? -1 : 1;
   await moveModule(str(formData, "moduleId"), direction);
@@ -71,12 +77,14 @@ export async function moveModuleAction(formData: FormData): Promise<void> {
 }
 
 export async function removeModuleAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await removeModule(str(formData, "moduleId"));
   refresh(courseId);
 }
 
 export async function addActivityAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   const format = str(formData, "format") as ActivityFormat;
   await addActivity(str(formData, "moduleId"), str(formData, "title"), format || "reading");
@@ -84,6 +92,7 @@ export async function addActivityAction(formData: FormData): Promise<void> {
 }
 
 export async function updateActivityAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await updateActivity(str(formData, "activityId"), {
     title: str(formData, "title"),
@@ -94,12 +103,14 @@ export async function updateActivityAction(formData: FormData): Promise<void> {
 }
 
 export async function removeActivityAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await removeActivity(str(formData, "activityId"));
   refresh(courseId);
 }
 
 export async function publishCourseAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   await publishCourse(courseId);
   refresh(courseId);
@@ -116,6 +127,7 @@ export async function publishCourseAction(formData: FormData): Promise<void> {
  * reputation for being fussy.
  */
 export async function importRosterAction(formData: FormData): Promise<void> {
+  await requireStaff();
   const courseId = str(formData, "courseId");
   const raw = str(formData, "roster");
 

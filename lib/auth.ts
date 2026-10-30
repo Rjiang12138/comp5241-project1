@@ -63,11 +63,22 @@ export async function getSession(): Promise<Session> {
   return toSession(match ?? fallback);
 }
 
-/** Server-side guard. Pages call this instead of trusting the UI. */
-export async function requireRole(role: Role): Promise<Session> {
+/**
+ * Server-side guard. Pages call this instead of trusting the UI.
+ *
+ * A learner who reaches a staff route is sent to `/learn`, not to `/login`: they
+ * are signed in, the page simply is not theirs. Sending them to a sign-in form
+ * would read as "your session expired", which is a different and wrong story.
+ */
+export async function requireRole(...roles: Role[]): Promise<Session> {
   const session = await getSession();
-  if (session.role !== role) redirect("/login");
+  if (!roles.includes(session.role)) redirect(session.role === "learner" ? "/learn" : "/login");
   return session;
+}
+
+/** Instructor or admin — the screens that manage courses and cohorts. */
+export async function requireStaff(): Promise<Session> {
+  return requireRole("instructor", "admin");
 }
 
 export async function isAdmin(): Promise<boolean> {

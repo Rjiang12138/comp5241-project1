@@ -1,5 +1,5 @@
 import Studio from "@/components/ported/Studio";
-import { getSession } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { llmConfigured } from "@/lib/llm";
 import { lastTouchedCourse } from "@/lib/store";
 
@@ -16,7 +16,7 @@ function ago(date: Date): string {
 }
 
 export default async function StudioPage() {
-  const session = await getSession();
+  const session = await requireStaff();
   // Shown in the page head so the screen never claims to be model-backed when
   // no key is configured — the same honesty the generation log enforces.
   const model = llmConfigured() ? (process.env.OPENROUTER_MODEL ?? "free-tier chain") : "template-v1";
