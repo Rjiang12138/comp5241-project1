@@ -203,7 +203,7 @@ server action and how many are inert prototype markup.
 | `/courses/[id]` editor | 57 | 55 | 2 | real: every module/activity edit writes to Postgres |
 | `/admin` | 5 | 5 | 0 | real |
 | `/courses` catalogue | 17 | 17 | 0 | links only, nothing to wire |
-| `/studio` | 23 | 10 | 13 | brief form and "Generate outline" are inert |
+| `/studio` | 20 | 18 | 2 | brief form and the whole pipeline are real; "Preview" and "Publish to cohort" land on the catalogue |
 | `/insights` | 18 | 8 | 10 | range filter, Export, Dismiss, Apply are inert |
 | `/path` | 18 | 3 | 15 | the whole path builder is inert |
 | `/learn` | 19 | 2 | 17 | the whole player is inert |
@@ -214,11 +214,33 @@ codebase uses for anything not built yet: **a control that says what it is beats
 a control that looks alive and does nothing.** The other four screens do not
 follow it — their buttons are live-looking and silent.
 
-This is the honest state of the product: **three surfaces are real, four are
-still the prototype.** The four are inert for the same reason — they were
+This is the honest state of the product: **four surfaces are real, three are
+still the prototype.** The three are inert for the same reason — they were
 ported verbatim from `prototype/`, and the prototype had no behaviour behind
-them. Anything demoed from Studio, Insights, Path or Learn is a screenshot, not
-a feature, and should be described that way in the week 8 meeting.
+them. Anything demoed from Insights, Path or Learn is a screenshot, not a
+feature, and should be described that way in the week 8 meeting.
+
+`/studio` moved from the inert list to the real one, and the move is worth
+recording because of *how* it was inert. The screen had 23 prototype controls
+and a script in `components/PrototypeScripts.tsx` that simulated generation:
+click `#genBtn`, fade the outline, light the log steps, print "Draft ready · 5
+modules". Once the real action was wired, that script did not politely step
+aside — it had attached its own click handler to the same button, so pressing
+"Generate outline" ran the animation *instead of* the server action and then
+overwrote the real status line with the canned text. The first end-to-end run
+"passed" in 0.5 s with zero module rows. **A fake that wins the race against the
+real thing is worse than no fake at all**, and the simulation block is now
+deleted rather than disabled.
+
+Six prototype controls on that screen were removed rather than wired: "Shuffle",
+"+ Add module / Suggest", "Compare with last draft", "Send for review", "Fix
+accessibility gap", and the invented finding "Captions missing for 2 narrated
+slides". None of them had a behaviour to recover — two implied features we have
+not built (version compare, module suggestion), and one was a fabricated
+pedagogy result. The pedagogy panel is now computed from the outline (four
+checks: objectives map to activities, module count under seven, retrieval
+practice last, a hands-on activity in every module), so its score is a fact
+rather than a typographic decoration.
 
 ### 8.3 Demo reset button (`/settings`)
 
@@ -252,3 +274,49 @@ test as much as in the code:
    A test that fails for its own reasons is indistinguishable from a product
    bug until you read what it actually compared.
 
+### 8.4 Upload a lecture PDF → a draft course (`/studio`)
+
+The flow under test is the one R7 promises: an instructor brings their own
+material and gets something they can edit. Driven in a real Chrome over CDP —
+the PDF is attached with `DOM.setFileInputFiles`, so the file goes through the
+browser's own form submission rather than a hand-built request.
+
+| Check | Result |
+| --- | --- |
+| Attach `2 - Software Development Lifecycle-1.pdf` (7.9 MB, 57 pages) | chip renders name and size; card head reads "1 file" |
+| Press "Generate outline" | server action runs; button disabled and labelled "Generating…" |
+| Wall clock, model path | 11.3 s (first model) / 27.1 s (after one fallback) |
+| Status line afterwards | "Draft ready · 5 modules · 9 activities · 45 min" |
+| Module rows rendered | 5, titles grounded in the deck (`Software Development Life Cycle (SDLC)` … `Working with AI Coding Agents`) |
+| Generation log | 5 steps with real timings; step 3 names the model that answered |
+| Rows in Postgres | `course` 1 · `module` 5 · `activity` 9–10 · `ai_runs` 1 (`outline` / `outline-json-v1` / model / 11 748 ms) |
+| `/courses/<new id>` fetched cold | contains every generated module and activity title in the server-rendered HTML |
+| Pedagogy panel | 3 / 4, with the failing check naming the actual reason (last module is a simulation, not retrieval) |
+| Brief-only submission (no file) | supported: the brief is used as the source, course is created |
+| Upload with no brief and no file | inline error under the button, nothing written |
+
+Four defects this found, all of which had to be fixed before the table above
+could be produced:
+
+1. **`Body exceeded 1 MB limit` (413).** Next.js caps server-action request
+   bodies at 1 MB. Every lecture deck is 3–8 MB, so the action never ran and the
+   browser got a 413 that renders as a generic error. Fixed in `next.config.ts`
+   with `experimental.serverActions.bodySizeLimit: "16mb"`; the per-file 12 MB
+   check in the action stays, because that is the layer that can say *which*
+   file was too big.
+2. **The prototype's fake generation won the click.** See §8.2 — the simulation
+   handler in `PrototypeScripts.tsx` was bound to the same `#genBtn`.
+3. **Free-tier models rate-limit upstream.** `google/gemma-4-*:free` returns 429
+   from the shared pool, and the reasoning-heavy free models return `200` with
+   empty `content` because they spend the whole token budget thinking. Both are
+   treated as failures; the chain moves to the next model and, if all fail,
+   falls back to the template rather than saving an empty course.
+4. **Module minutes did not add up.** A model would return a 10-minute module
+   whose two activities were 4 + 4. `scaleActivities` rescales to the stated
+   length so the editor, the learner path and the pedagogy check agree.
+
+The prompt was measured before it was trusted. Four free models were asked for
+the same outline; two produced grounded, usable sequences (45 minutes exactly,
+titles traceable to the slides), two produced nothing usable. The two that
+worked are the chain; the two that did not are documented in `lib/llm.ts` so
+nobody re-adds them by reading a leaderboard.

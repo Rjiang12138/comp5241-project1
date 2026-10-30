@@ -45,35 +45,16 @@ export default function PrototypeScripts() {
       cleanups.push(() => group.removeEventListener("click", onClick));
     });
 
-    /* generation log */
-    const genBtn = document.getElementById("genBtn") as HTMLButtonElement | null;
-    if (genBtn) {
-      const timers: number[] = [];
-      const steps = Array.from(document.querySelectorAll(".log-step"));
-      const status = document.getElementById("genStatus");
-      const outline = document.getElementById("outline");
-      const run = () => {
-        genBtn.disabled = true;
-        if (outline) outline.style.opacity = ".35";
-        steps.forEach((s) => s.classList.add("pending"));
-        if (status) status.textContent = "Generating…";
-        steps.forEach((s, i) => {
-          timers.push(window.setTimeout(() => s.classList.remove("pending"), 260 + i * 420));
-        });
-        timers.push(
-          window.setTimeout(() => {
-            genBtn.disabled = false;
-            if (outline) outline.style.opacity = "1";
-            if (status) status.textContent = "Draft ready · 5 modules · 6 activities · 47 min";
-          }, 260 + steps.length * 420 + 200),
-        );
-      };
-      genBtn.addEventListener("click", run);
-      cleanups.push(() => {
-        genBtn.removeEventListener("click", run);
-        timers.forEach((t) => window.clearTimeout(t));
-      });
-    }
+    /*
+     * The generation log used to be simulated here: click #genBtn, fade the
+     * outline, light up the log steps, print "Draft ready · 5 modules".
+     *
+     * That block is gone because /studio is real now. Leaving it in was not
+     * harmless — it attached its own click handler to the same #genBtn, so
+     * pressing the button ran the animation *instead of* the server action and
+     * overwrote the real result with the canned text. A fake that wins the race
+     * against the real thing is worse than no fake at all.
+     */
 
     /* test runner */
     const runTests = document.getElementById("runTests") as HTMLButtonElement | null;

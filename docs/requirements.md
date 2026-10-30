@@ -11,7 +11,7 @@ what the prototype actually shows today. `[P]` = present in prototype, `[S]` = s
 | R4 | Content accessible to non-CS majors *and* valuable to CS graduates | must | audience control in `studio.html`; three tutor registers in `learn.html` | [P] |
 | R5 | AI provides personalised, tailored content to different backgrounds and goals | must | adaptation rules in `course.html`; mastery panel in `learn.html` | [P] mock |
 | R6 | Instructors customise learning contents and activities, manually or using AI | must | studio outline editing, regenerate, shuffle, per-activity settings | [P] |
-| R7 | Instructors generate new mini-courses from "their own topics, requirements, and teaching content" | must | brief + source files → outline; generation log | [P] mock |
+| R7 | Instructors generate new mini-courses from "their own topics, requirements, and teaching content" | must | `/studio`: upload PDF/MD/TXT → parse → outline → draft course in Postgres | [P] **built** — see §R7 below |
 | R8 | Import students into courses and track participation and engagement | must | cohort table with progress, last active, status; import from Moodle / CSV | [P] |
 | R9 | Generate mini-courses for other subjects/domains | should | `path.html` — "Generate a new course" for any domain | [P] entry point |
 | R10 | Learners generate their own topics and self-learning paths | must | `path.html` — goal, level, time budget → sequenced path | [P] |
@@ -45,3 +45,42 @@ what the prototype actually shows today. `[P]` = present in prototype, `[S]` = s
    would mean two copies of every string across six screens that are generated
    from `prototype/`, so a copy edit would have to be made twice. If it is ever
    wanted, the place to do it is `tools/html_to_tsx.py`, not the components.
+
+## R7 in detail — what "generate a course" actually does
+
+The studio's "Generate outline" button is not a mock. The path from an upload to
+a draft course that the editor can open is:
+
+```
+POST /studio (multipart, ≤16 MB)
+  → lib/generate.ts  readSource()        unpdf → text, or UTF-8 for .md/.txt/.csv
+  →                  toHeadings()        slide-aware segmentation, not paragraph splitting
+  →                  generateOutline()   model first, template as the fallback
+  → lib/store.ts     createCourseFromOutline()
+                                         one transaction: course + modules + activities + ai_runs
+  → components/StudioWorkspace.tsx       outline rendered back into the same screen,
+                                         "Open in editor" → /courses/[id]
+```
+
+Decisions worth defending in a viva:
+
+- **Two generators, one seam.** With `OPENROUTER_API_KEY` set, `completeJson` asks
+  a model for the module sequence and `coerceModules` validates the reply before
+  it is saved. Without a key — or when every model in the chain fails — the
+  built-in template runs instead. Both paths return the same type, so nothing
+  downstream knows or cares which one ran. `GeneratedOutline.template` records it.
+- **The fallback is not a silent one.** The studio's generation log names the
+  model that answered, or says "fell back to the built-in template". The note in
+  the right-hand column changes with it. A draft that cannot be traced to how it
+  was made is not auditable, and the brief asks for an auditable log.
+- **The model is given a sketch, not the deck.** Titles plus the first two lines
+  under each, capped at 45 headings. Sending the whole text costs tokens and
+  makes the model quote bullets instead of designing a sequence.
+- **Validation is where the trust stops.** Formats are checked against the enum,
+  minutes are rescaled so each module's activities add up to its stated length,
+  and an unparseable or out-of-shape reply is rejected outright rather than
+  coerced into rows the editor cannot render.
+- **The ceiling is honest.** Free-tier models are rate-limited upstream, which is
+  why the chain has two entries and why the template exists at all. Measured on
+  the COMP5241 SDLC deck (57 pages): 11–27 s end to end, 5 modules, 9–10
+  activities, 45 minutes.

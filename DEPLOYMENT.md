@@ -80,7 +80,9 @@ Copy `.env.example` to `.env.local`, or let the Neon CLI write it
 | `DATABASE_URL_UNPOOLED` | for DDL | Direct endpoint. `prisma db push` and migrations need it; PgBouncer cannot run DDL. |
 | `AUTH_SECRET` | no (week 10) | Cookie signing key for the real auth provider. `openssl rand -base64 32`. |
 | `NEXT_PUBLIC_APP_URL` | no | Absolute URLs in outbound links. Set to the deployed origin. |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `LLM_MODEL` | no (week 10) | Read by the generation pipeline, not by any current code path. |
+| `OPENROUTER_API_KEY` | no | Enables the model-backed path in the course generator. **Empty is a supported state**: `/studio` falls back to the built-in template and says so on screen. |
+| `OPENROUTER_MODEL` | no | Pins one model instead of the default free-tier chain (`poolside/laguna-s-2.1:free` → `nvidia/nemotron-3-ultra-550b-a55b:free`). |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | no (week 10) | Read by nothing yet. |
 
 Never commit `.env.local`. `.gitignore` already covers `.env` and `.env*.local`;
 `.env.example` is the file that is meant to be committed.
@@ -107,6 +109,11 @@ page reads the database through `getSession()`.
    uses, so the preview reads the same rows. `prisma generate` does not connect,
    but any page that renders does, and a missing variable surfaces as
    `Environment variable not found: DATABASE_URL` at build time.
+
+   Optionally add `OPENROUTER_API_KEY` as well. Without it the deployed studio
+   still generates courses, using the template; with it, generation calls a
+   model. Add it to Production and Preview separately — Vercel does not copy
+   variables between environments.
 
 5. **Deploy.**
 

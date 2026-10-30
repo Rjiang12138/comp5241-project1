@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import type { GeneratedOutline } from "./generate";
 import type {
   Activity,
   ActivityFormat,
@@ -258,4 +259,77 @@ export async function createCohort(input: {
 
 export async function assignInstructor(cohortId: string, instructorId: string): Promise<void> {
   await prisma.cohort.update({ where: { id: cohortId }, data: { instructorId } });
+}
+
+/**
+ * Persist a generated outline as a draft course and return its id.
+ *
+ * One transaction, because a course with no modules is a row the editor cannot
+ * render and a module with no activities is a screen the instructor has to
+ * repair by hand. The `ai_runs` row is written in the same transaction so the
+ * audit trail cannot drift from the artefact it describes — the brief asks for a
+ * generation log that survives the session, not a `console.log`.
+ */
+export async function createCourseFromOutline(input: {
+  title: string;
+  brief: string;
+  audience: "non_cs" | "cs" | "mixed";
+  minutes: number;
+  ownerId: string;
+  model: string;
+  outline: GeneratedOutline;
+}): Promise<string> {
+  return prisma.$transaction(async (tx) => {
+    const course = await tx.course.create({
+      data: {
+        title: input.title.trim() || "Untitled course",
+        brief: input.brief,
+        audience: input.audience,
+        minutes: input.minutes,
+        ownerId: input.ownerId,
+        status: "draft",
+      },
+      select: { id: true },
+    });
+
+    for (const [moduleIndex, module] of input.outline.modules.entries()) {
+      const created = await tx.module.create({
+        data: {
+          courseId: course.id,
+          position: moduleIndex + 1,
+          title: module.title,
+          objective: module.objective,
+          estimatedMinutes: module.estimatedMinutes,
+        },
+        select: { id: true },
+      });
+
+      for (const [activityIndex, activity] of module.activities.entries()) {
+        await tx.activity.create({
+          data: {
+            moduleId: created.id,
+            position: activityIndex + 1,
+            title: activity.title,
+            format: activity.format,
+            minutes: activity.minutes,
+          },
+        });
+      }
+    }
+
+    await tx.aiRun.create({
+      data: {
+        purpose: "outline",
+        courseId: course.id,
+        // Which prompt produced this draft, so a later audit can tell a model
+        // draft from a template one without reading the course itself.
+        promptVersion: input.outline.template ? "template-v1" : "outline-json-v1",
+        model: input.model,
+        latencyMs: input.outline.steps.reduce((sum, step) => sum + step.ms, 0),
+        acceptedBy: input.ownerId,
+      },
+    });
+
+    return course.id;
+  });
 }

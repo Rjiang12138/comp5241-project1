@@ -34,6 +34,7 @@ Framework: **Delegation** (what we hand over) · **Description** (how we specify
 | 6 | 10-17 | Cohort analytics numbers | Diligence | "Realistic engagement data for a 24-person cohort over 8 weeks." | the model produced confident, internally consistent, entirely invented numbers | **removed from UI**, replaced with seeded data and labelled "prototype seed" |
 | 7 | 10-18 | SVG engagement chart | Delegation | "Area chart, 8 points, grid, target line, one annotated point, no library." | correct geometry, wrong baseline (axis started at the data minimum) | accepted after setting the scale explicitly |
 | 8 | 10-19 | Mid-term document structure | Description | "Outline a progress update against this rubric; do not write the prose." | usable headings, prose was unusable when we tried it | structure kept, prose written by us |
+| 9 | 10-30 | Course outline generator (in-product) | Discernment | "Turn these 63 slide headings into a 45-minute module sequence for non-CS students. JSON only. Titles must come from the source." | of four free models tried, two produced grounded sequences (45 min exactly, titles traceable to the deck); one returned 429 from the shared pool, two burned the whole budget on reasoning and returned empty content | two kept, two rejected — and the whole thing is wrapped in a template fallback because a free tier is not a dependency |
 
 ## 3. Three cases worth presenting
 
