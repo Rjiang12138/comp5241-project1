@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import ResetDemoForm from "@/components/ResetDemoForm";
-import { getSession } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { resetDemoDataAction, saveProfileAction } from "./actions";
 import { signOutAction } from "../login/actions";
 
@@ -35,7 +35,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ reset?: string; profile?: string }>;
 }) {
-  const session = await getSession();
+  const session = await requireUser("/settings");
   const { reset, profile } = await searchParams;
 
   return (

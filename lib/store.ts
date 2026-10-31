@@ -410,7 +410,7 @@ export type LearnerView = {
   completed: string[];
   /** Attempts per activity id, counted from the event log. */
   attempts: Record<string, number>;
-  /** Where to resume: first unfinished activity, or the last one. */
+  /** Where to resume: the first unfinished activity; null once the course is done. */
   currentActivityId: string | null;
   totalActivities: number;
   totalMinutes: number;
@@ -468,7 +468,10 @@ export async function getLearnerView(userId: string, courseId?: string): Promise
   }
 
   const ordered = course.modules.flatMap((module) => module.activities.map((activity) => activity.id));
-  const currentActivityId = ordered.find((id) => !completed.includes(id)) ?? ordered[ordered.length - 1] ?? null;
+  // `null` when everything is finished. Falling back to the last activity is how
+  // a learner who had completed a course kept landing on its final quiz with a
+  // greyed-out "Completed" button and no way forward.
+  const currentActivityId = ordered.find((id) => !completed.includes(id)) ?? null;
 
   return {
     learner,
@@ -485,6 +488,60 @@ export async function getLearnerView(userId: string, courseId?: string): Promise
     courses: enrolments.map((row) => ({ id: row.course.id, title: row.course.title, minutes: row.course.minutes })),
     lastActiveAt: events.length > 0 ? events[events.length - 1].createdAt : null,
   };
+}
+
+export type CourseProgress = { completed: number; total: number; minutesDone: number };
+
+/**
+ * How far one person is through each course they are enrolled in.
+ *
+ * `/path` needs this per step. It used to print a hard-coded 40% on whichever
+ * step was "you are here" — a number inherited from the prototype that was true
+ * of nothing. A learner who had finished all seven activities of a course still
+ * saw 40% on the step that pointed at it.
+ */
+export async function learnerCourseProgress(userId: string): Promise<Record<string, CourseProgress>> {
+  const enrolments = await prisma.enrollment.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      courseId: true,
+      course: {
+        select: {
+          modules: { select: { activities: { select: { id: true, minutes: true } } } },
+        },
+      },
+    },
+  });
+  if (enrolments.length === 0) return {};
+
+  const done = await prisma.event.findMany({
+    where: {
+      enrollmentId: { in: enrolments.map((row) => row.id) },
+      type: "activity_completed",
+    },
+    select: { enrollmentId: true, activityId: true },
+  });
+
+  const byEnrolment = new Map<string, Set<string>>();
+  for (const event of done) {
+    if (!event.activityId) continue;
+    const set = byEnrolment.get(event.enrollmentId) ?? new Set<string>();
+    set.add(event.activityId);
+    byEnrolment.set(event.enrollmentId, set);
+  }
+
+  const out: Record<string, CourseProgress> = {};
+  for (const enrolment of enrolments) {
+    const activities = enrolment.course.modules.flatMap((module) => module.activities);
+    const finished = byEnrolment.get(enrolment.id) ?? new Set<string>();
+    out[enrolment.courseId] = {
+      completed: activities.filter((activity) => finished.has(activity.id)).length,
+      total: activities.length,
+      minutesDone: activities.filter((activity) => finished.has(activity.id)).reduce((sum, activity) => sum + activity.minutes, 0),
+    };
+  }
+  return out;
 }
 
 /** Append one row to the event log. Nothing in the app ever updates one. */

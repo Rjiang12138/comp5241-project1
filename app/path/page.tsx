@@ -1,6 +1,6 @@
 import PathBuilder from "@/components/PathBuilder";
-import { getSession } from "@/lib/auth";
-import { getLatestPath, pathLibrary } from "@/lib/store";
+import { requireUser } from "@/lib/auth";
+import { getLatestPath, learnerCourseProgress, pathLibrary } from "@/lib/store";
 import {
   clearPathAction,
   completeStepAction,
@@ -24,12 +24,36 @@ const DOMAIN_LABEL: Record<string, string> = {
 
 export default async function PathPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
-  const session = await getSession();
-  const [path, library] = await Promise.all([getLatestPath(session.userId), pathLibrary()]);
+  const session = await requireUser("/path");
+  const [path, library, progress] = await Promise.all([
+    getLatestPath(session.userId),
+    pathLibrary(),
+    learnerCourseProgress(session.userId),
+  ]);
 
-  const doneCount = path ? path.steps.filter((step) => step.status === "done").length : 0;
+  /**
+   * A step is done when its flag says so, or when the event log says every
+   * activity in the course behind it is finished. The second half is the fix
+   * for a real complaint: a learner completed all seven activities of the
+   * course on step 1 and the path still drew "you are here · 40%", because the
+   * percentage was a constant carried over from the prototype.
+   */
+  const percentOf = (step: { status: string; courseId: string | null }): number => {
+    if (step.status === "done") return 100;
+    const row = step.courseId ? progress[step.courseId] : undefined;
+    if (!row || row.total === 0) return 0;
+    return Math.round((row.completed / row.total) * 100);
+  };
+
+  const doneCount = path ? path.steps.filter((step) => percentOf(step) === 100).length : 0;
   const gaps = path ? path.steps.filter((step) => !step.courseId).length : 0;
-  const nowIndex = path ? path.steps.findIndex((step) => step.status !== "done") : -1;
+  const nowIndex = path ? path.steps.findIndex((step) => percentOf(step) < 100) : -1;
+
+  // Generating a course is an instructor action. A learner who presses it is
+  // sent to the sign-in page with the reason, rather than bounced to /learn —
+  // which is what the role guard used to do, silently, making the button look
+  // broken.
+  const generateHref = session.role === "learner" ? "/login?next=%2Fstudio&need=staff" : "/studio";
 
   // Swap can only offer a course this path has not used yet. When every
   // published course is already in the path the button has nothing to give, and
@@ -120,24 +144,27 @@ export default async function PathPage({ searchParams }: { searchParams: Promise
               <div className="card-body">
                 <div className="timeline">
                   {path.steps.map((step, index) => {
-                    const status = step.status === "done" ? "done" : index === nowIndex ? "now" : "";
-                    const progress = step.status === "done" ? 100 : index === nowIndex ? 40 : 0;
+                    const percent = percentOf(step);
+                    const finished = percent === 100;
+                    const status = finished ? "done" : index === nowIndex ? "now" : "";
+                    const row = step.courseId ? progress[step.courseId] : undefined;
                     return (
                       <div className={`tl-item ${status}`} key={step.id}>
                         <div className="between" style={{ alignItems: "flex-start" }}>
                           <div>
                             <div className="row" style={{ gap: "8px" }}>
                               <b style={{ fontSize: "13.6px" }}>{step.title}</b>
-                              <span className={step.status === "done" ? "pill pill-teal" : index === nowIndex ? "pill pill-brand" : "pill"}>
-                                {step.status === "done" ? "done" : index === nowIndex ? "you are here" : "not started"}
+                              <span className={finished ? "pill pill-teal" : index === nowIndex ? "pill pill-brand" : "pill"}>
+                                {finished ? "done" : index === nowIndex ? "you are here" : "not started"}
                               </span>
                               {!step.courseId ? <span className="pill pill-amber">gap</span> : null}
                             </div>
                             <div className="tiny muted" style={{ marginTop: "3px" }}>
                               {Math.round(step.minutes / 60 * 10) / 10} h · {step.detail}
+                              {row && row.total > 0 ? ` · ${row.completed} of ${row.total} activities done` : ""}
                             </div>
                           </div>
-                          <span className="tiny muted">{progress}%</span>
+                          <span className="tiny muted">{percent}%</span>
                         </div>
 
                         <div className="row mt-8" style={{ gap: "8px", flexWrap: "wrap" }}>
@@ -147,11 +174,11 @@ export default async function PathPage({ searchParams }: { searchParams: Promise
                             <form action={startStepAction}>
                               <input type="hidden" name="courseId" value={step.courseId} />
                               <button className="btn btn-sm btn-primary" type="submit">
-                                {step.status === "done" ? "Replay" : "Start"}
+                                {finished ? "Replay" : percent > 0 ? "Continue" : "Start"}
                               </button>
                             </form>
                           ) : (
-                            <a className="btn btn-sm" href="/studio">
+                            <a className="btn btn-sm" href={generateHref}>
                               Generate this course
                             </a>
                           )}
@@ -168,12 +195,22 @@ export default async function PathPage({ searchParams }: { searchParams: Promise
                             </button>
                           </form>
 
-                          <form action={step.status === "done" ? reopenStepAction : completeStepAction}>
-                            <input type="hidden" name="stepId" value={step.id} />
-                            <button className="btn btn-sm btn-ghost" type="submit">
-                              {step.status === "done" ? "Reopen" : "Mark done"}
-                            </button>
-                          </form>
+                          {/*
+                            A step with a course behind it is finished by the event
+                            log, not by a tick: offering "Mark done" there let the
+                            flag and the evidence disagree, and "Reopen" could not
+                            un-finish an activity the learner had actually done.
+                            The manual tick stays for gap steps, where there is no
+                            course to produce evidence.
+                          */}
+                          {step.courseId ? null : (
+                            <form action={step.status === "done" ? reopenStepAction : completeStepAction}>
+                              <input type="hidden" name="stepId" value={step.id} />
+                              <button className="btn btn-sm btn-ghost" type="submit">
+                                {step.status === "done" ? "Reopen" : "Mark done"}
+                              </button>
+                            </form>
+                          )}
                         </div>
                       </div>
                     );
@@ -224,10 +261,12 @@ export default async function PathPage({ searchParams }: { searchParams: Promise
           <div style={{ flex: "1" }}>
             <div style={{ fontSize: "13px", fontWeight: "600" }}>Need a subject Praxis has never taught?</div>
             <div className="tiny muted" style={{ marginTop: "2px" }}>
-              Upload your own material in the studio and the course becomes available here for everyone.
+              {session.role === "learner"
+                ? "Courses are written in the studio, which needs an instructor account. Sign in as staff and the course you generate appears here for everyone."
+                : "Upload your own material in the studio and the course becomes available here for everyone."}
             </div>
           </div>
-          <a className="btn btn-sm" href="/studio">Generate a new course</a>
+          <a className="btn btn-sm" href={generateHref}>Generate a new course</a>
         </div>
       </div>
     </>

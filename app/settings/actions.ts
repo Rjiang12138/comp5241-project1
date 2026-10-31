@@ -39,7 +39,7 @@ export async function saveProfileAction(formData: FormData): Promise<void> {
  * not JavaScript is running.
  */
 export async function resetDemoDataAction(formData: FormData) {
-  await requireRole("admin");
+  await requireRole(["admin"]);
 
   const typed = String(formData.get("confirm") ?? "").trim().toUpperCase();
   if (typed !== "RESET") {

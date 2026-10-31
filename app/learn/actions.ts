@@ -43,6 +43,13 @@ export async function completeActivityAction(input: {
   /** What the learner produced, kept in the log so a reviewer can see it. */
   response?: string;
   score?: { correct: number; total: number };
+  /**
+   * Where to go after saving. The redirect happens here, on the server, because
+   * a client-side `router.push` immediately after the action loses the race
+   * against the refresh the action triggers — the learner stayed on the
+   * activity they had just finished while its button turned into "Completed".
+   */
+  nextActivityId?: string | null;
 }): Promise<{ ok: boolean }> {
   const enrollment = await verify(input.enrollmentId, input.courseId);
   if (!enrollment) return { ok: false };
@@ -58,6 +65,7 @@ export async function completeActivityAction(input: {
   });
 
   refresh(input.courseId);
+  if (input.nextActivityId) redirect(`/learn?course=${input.courseId}&activity=${input.nextActivityId}`);
   return { ok: true };
 }
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSession } from "@/lib/auth";
+import { getSessionOrNull } from "@/lib/auth";
 import { listSignableUsers } from "@/lib/store";
 import { signInAction, signOutAction } from "./actions";
 
@@ -23,15 +23,33 @@ const ROLE_PILL: Record<string, { label: string; className: string }> = {
   learner: { label: "Learner", className: "pill pill-teal" },
 };
 
-export default async function LoginPage() {
-  const session = await getSession();
+type Search = { next?: string; need?: string };
+
+/** Only a same-site path is worth returning to; anything else is not a route. */
+function safeNext(value?: string): string | undefined {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return undefined;
+  if (value === "/login" || value.startsWith("/login?")) return undefined;
+  return value;
+}
+
+const NEED_COPY: Record<string, string> = {
+  staff: "That page is for instructors and admins.",
+  admin: "That page is for the registry admin.",
+};
+
+export default async function LoginPage({ searchParams }: { searchParams: Promise<Search> }) {
+  const params = await searchParams;
+  const session = await getSessionOrNull();
   const users = await listSignableUsers();
   const staff = users.filter((user) => user.role !== "learner");
   const learners = users.filter((user) => user.role === "learner");
+  const next = safeNext(params.next);
+  const need = params.need ? NEED_COPY[params.need] : undefined;
 
   const card = (user: (typeof users)[number]) => (
     <form action={signInAction} key={user.id}>
       <input type="hidden" name="userId" value={user.id} />
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <button className="signin-card" type="submit" style={{ width: "100%" }}>
         <div className="row">
           <span className="avatar">{initials(user.name)}</span>
@@ -55,12 +73,30 @@ export default async function LoginPage() {
             <div>
               <h1 style={{ fontSize: "19px" }}>Choose a role to continue</h1>
               <p className="muted" style={{ fontSize: "13px", marginTop: "4px" }}>
-                The platform has three roles. Each one sees a different shell.
+                {next ? (
+                  <>
+                    You were heading to <b>{next}</b>. Pick the identity you want to arrive as.
+                  </>
+                ) : (
+                  "The platform has three roles. Each one sees a different shell."
+                )}
               </p>
             </div>
-            <span className="pill pill-brand">Week 9 demo session</span>
+            <span className="pill pill-brand">Demo session</span>
           </div>
         </div>
+
+        {need ? (
+          <div
+            className="card card-pad"
+            style={{ marginBottom: "14px", background: "var(--amber-soft)", borderColor: "#fde68a" }}
+          >
+            <div className="tiny" style={{ lineHeight: 1.6 }}>
+              <b>{need}</b> A learner account cannot open it — choose an instructor or admin below to continue, or{" "}
+              <Link href="/learn">go back to your learning</Link>.
+            </div>
+          </div>
+        ) : null}
 
         <div className="side-label" style={{ padding: "0 2px 8px" }}>
           Staff
@@ -74,17 +110,25 @@ export default async function LoginPage() {
 
         <div className="between" style={{ marginTop: "16px" }}>
           <span className="tiny muted">
-            Signed in as <b>{session.name}</b> · {session.role}
+            {session ? (
+              <>
+                Signed in as <b>{session.name}</b> · {session.role}
+              </>
+            ) : (
+              "Not signed in yet"
+            )}
           </span>
           <div className="row">
             <Link className="btn btn-sm btn-ghost" href="/">
               Back to landing
             </Link>
-            <form action={signOutAction}>
-              <button className="btn btn-sm" type="submit">
-                Sign out
-              </button>
-            </form>
+            {session ? (
+              <form action={signOutAction}>
+                <button className="btn btn-sm" type="submit">
+                  Sign out
+                </button>
+              </form>
+            ) : null}
           </div>
         </div>
 

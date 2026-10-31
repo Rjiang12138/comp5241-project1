@@ -160,6 +160,10 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-14 | A dropped connection to Postgres showed Next's bare "Application error" screen with a digest | major | fixed | §8.10 — an error boundary that names the cause and offers a retry |
 | D-15 | "Generate outline" answered 500 with `P2028` — the transaction exceeded its 5 s budget | blocker | fixed | §8.11 — one nested write instead of seventeen sequential inserts |
 | D-16 | A brief with no uploaded deck produced "No sections found in that material" | blocker | fixed | §8.11 — the brief is a source, and it is enough to call the model |
+| D-17 | `/path` printed a hard-coded 40% on the current step whatever the learner had done | major | fixed | §8.12 — the step reads the event log |
+| D-18 | "Complete and continue" left the learner on the finished activity, button now reading "Completed" | blocker | fixed | §8.12 — the action redirects instead of racing a client push |
+| D-19 | A deep link opened as Dr. R. Kwok without signing in; a learner pressing "Generate this course" was silently bounced to `/learn` | major | fixed | §8.12 — `requireUser()` and `/login?next=…` |
+| D-20 | Opening a finished course resumed on its last activity, with no way forward | major | fixed | §8.12 — a completion page that names the next step |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -495,6 +499,12 @@ A guard is only verified when the test signs in as the role being refused. A
 guard tested as an instructor proves nothing — it is the same mistake as D-01,
 trusting the screen instead of the state behind it.
 
+*Superseded by D-19:* the `307 → /learn` in the table above was itself wrong for
+a learner who had pressed a button labelled "Generate this course" — it moved
+them somewhere without saying why. The refusal now goes to
+`/login?next=<the page they asked for>&need=<the role it takes>`, which is the
+same refusal with an explanation attached.
+
 ### 8.10 A lost connection is a state, not a framework error
 
 Opening the app while the Postgres branch was unreachable produced Next's own
@@ -576,3 +586,58 @@ The log line "modules reviewed against the source order" was also wrong when
 there was no source; it now says "against the order you described". Small, but
 this whole section exists because a screen said one thing and the code did
 another.
+
+### 8.12 The learner path: three dead ends and a false number
+
+A learner signed in, built a path, played the course on step 1 to the end, and
+reported four things. All four were real.
+
+**D-17 — 40% was a constant.** `/path` drew the current step as `40`, the next
+as `0`, and a finished one as `100` — literals from the prototype. Someone who
+had completed all seven activities of the course attached to step 1 still read
+"you are here · 40%". The step now counts `activity_completed` events for that
+enrolment; `learnerCourseProgress()` returns `{completed, total, minutesDone}`
+per course and the page derives the percentage, the "N of M activities done"
+line, and the Start / Continue / Replay label from it. "Mark done" and "Reopen"
+are gone from course-backed steps: the event log is the evidence, and a manual
+tick that the evidence can contradict is a control that lies.
+
+**D-18 — the navigation lost a race.** `complete()` called `router.push(next)`
+and then `router.refresh()` in the same tick. The refresh won, re-rendered the
+activity that had just been finished, and dropped the pending push — so the
+button changed to "Completed" and the learner never moved. The redirect now
+happens in `completeActivityAction`, on the server, which is the same mechanism
+`startStepAction` and `enrollAction` already used. Verified by clicking through
+in a browser: the URL changes to `?activity=a-5-1` and the page renders
+"Activity 7 of 7 · Quiz".
+
+**D-19 — identity was implicit.** `getSession()` fell back to the demo
+instructor whenever the cookie was missing, so `/studio` opened as Dr. R. Kwok
+without anyone signing in — and a learner pressing "Generate this course" hit
+the role guard, which redirected them to `/learn`, which resumed their course.
+The button looked broken because it silently did something else. Now every page
+that draws a person calls `requireUser(from)`; the guard carries the intended
+destination (`/login?next=%2Fstudio`) and the reason (`&need=staff`), the sign-in
+page prints both, and `signInAction` returns to `next` when the chosen role can
+open it.
+
+**D-20 — a finished course had no exit.** Resuming fell back to the last
+activity when nothing was left, so the only button was a disabled "Completed".
+`currentActivityId` is now `null` when the course is done and `/learn` renders a
+completion page: the next unfinished step in the path, else the other enrolments,
+else the published library. Inside the player, a finished activity's button
+becomes "Next activity →" (or "Back to my path" on the last one) instead of a
+disabled label.
+
+| Check | Before | After |
+| --- | --- | --- |
+| Learner who finished 7/7 opens `/path` | step 1 · "you are here" · 40% | step 1 · "done" · 100% · "7 of 7 activities done" · Replay |
+| Same learner opens `/learn` | activity 7 of 7, button disabled, "Completed" | "You finished Software Engineering Foundations" + next step |
+| Learner at 5/7 opens `/learn` | resumes the first unfinished activity | unchanged — activity 6 of 7 |
+| Complete a middle activity in a browser | stays put, button reads "Completed" | `?activity=a-5-1`, "Activity 7 of 7 · Quiz" |
+| Cold visit to `/studio` | staff shell as Dr. R. Kwok | `/login?next=%2Fstudio` |
+| Learner presses "Generate this course" | `/learn`, no explanation | `/login?next=%2Fstudio&need=staff`, with the reason on screen |
+| Instructor visits `/admin` | `/login` (no reason) | `/login?next=%2Fadmin&need=admin` |
+
+Test events written while checking D-18 were deleted afterwards; the cohort's
+completion counts are back to their seeded values.

@@ -33,7 +33,7 @@ export default async function VersionsPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const session = await requireStaff();
+  const session = await requireStaff(`/courses/${id}/versions`);
   const course = await getCourse(id);
   if (!course) notFound();
 

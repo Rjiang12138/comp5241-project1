@@ -36,8 +36,10 @@ npm run db:seed      # load the prototype fixture data
 npm run dev          # http://localhost:3000
 ```
 
-Data lives in a Neon Postgres branch. You land as **Dr. R. Kwok** (instructor);
-`/login` switches role — pick **A. Tse** to see the admin console.
+Data lives in a Neon Postgres branch. `/` is public; every other route asks who
+you are first and returns you to where you were going. `/login` lists three
+staff and three learners — pick **A. Tse** to see the admin console, or one of
+the learners to see `/path` and `/learn`.
 
 | Route | What it is | Owner |
 | --- | --- | --- |

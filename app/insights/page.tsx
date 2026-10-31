@@ -57,7 +57,7 @@ function chart(values: number[]) {
 
 export default async function InsightsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
-  const session = await requireStaff();
+  const session = await requireStaff("/insights");
   const [courses, busiest] = await Promise.all([listCourses(), courseWithMostLearners()]);
 
   const course =

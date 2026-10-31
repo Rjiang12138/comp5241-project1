@@ -137,24 +137,28 @@ export default function LearnPlayer(props: Props) {
 
   const quizReady = content.kind === "quiz" && quizSubmitted && quizScore === content.questions.length;
 
-  function advance() {
-    const target = nextId ?? activity.id;
-    router.push(`/learn?course=${courseId}&activity=${target}`);
-    router.refresh();
-  }
-
+  /**
+   * Completing an activity navigates on the server.
+   *
+   * The action redirects to the next activity, so the browser fetches it after
+   * the write instead of racing a client-side push against the refresh the
+   * action itself triggers. The earlier version pushed and refreshed at once,
+   * the refresh won, and "Complete and continue" left the learner on the
+   * activity they had just finished, with the button now reading "Completed" —
+   * the dead end that prompted this whole pass.
+   */
   function complete(payload?: { response?: string; score?: { correct: number; total: number } }) {
     startTransition(async () => {
       const result = await completeActivityAction({
         enrollmentId,
         activityId: activity.id,
         courseId,
+        nextActivityId: nextId,
         ...payload,
       });
-      if (result.ok) {
+      if (result?.ok) {
         setDone(true);
-        if (nextId) advance();
-        else router.refresh();
+        if (!nextId) router.refresh();
       }
     });
   }
@@ -616,7 +620,9 @@ export default function LearnPlayer(props: Props) {
               <div className="between">
                 <div className="tiny muted">
                   {done
-                    ? "Recorded in the event log. Progress on /insights updates from here."
+                    ? nextId
+                      ? "Recorded in the event log. The next activity is unlocked."
+                      : "Recorded in the event log. That was the last activity in this course."
                     : canComplete
                       ? "Ready to complete."
                       : content.kind === "quiz"
@@ -626,29 +632,54 @@ export default function LearnPlayer(props: Props) {
                           : "Do the task above, then mark it complete."}
                 </div>
                 <div className="row">
-                  <a className={`btn btn-sm${prevId ? "" : " btn-ghost"}`} href={prevId ? `/learn?course=${courseId}&activity=${prevId}` : undefined} aria-disabled={!prevId}>
-                    Back
-                  </a>
-                  <button
-                    className="btn btn-sm btn-primary"
-                    type="button"
-                    disabled={pending || done || !canComplete}
-                    onClick={() =>
-                      complete({
-                        response:
-                          content.kind === "role_play" || content.kind === "reflection"
-                            ? written
-                            : content.kind === "code_lab"
-                              ? code
-                              : content.kind === "peer_review"
-                                ? found.join(" | ")
-                                : undefined,
-                        score: content.kind === "quiz" ? { correct: quizScore, total: content.questions.length } : undefined,
-                      })
-                    }
-                  >
-                    {done ? "Completed" : pending ? "Saving…" : nextId ? "Complete and continue →" : "Complete"}
-                  </button>
+                  {prevId ? (
+                    <a className="btn btn-sm" href={`/learn?course=${courseId}&activity=${prevId}`}>
+                      Back
+                    </a>
+                  ) : (
+                    <button className="btn btn-sm btn-ghost" type="button" disabled title="This is the first activity">
+                      Back
+                    </button>
+                  )}
+
+                  {/*
+                    A finished activity used to end here: one button, disabled,
+                    labelled "Completed". Anyone who came back to re-read it had
+                    no way forward except the lesson list. Done means done — the
+                    button becomes the way on.
+                  */}
+                  {done ? (
+                    nextId ? (
+                      <a className="btn btn-sm btn-primary" href={`/learn?course=${courseId}&activity=${nextId}`}>
+                        Next activity →
+                      </a>
+                    ) : (
+                      <a className="btn btn-sm btn-primary" href="/path">
+                        Back to my path
+                      </a>
+                    )
+                  ) : (
+                    <button
+                      className="btn btn-sm btn-primary"
+                      type="button"
+                      disabled={pending || !canComplete}
+                      onClick={() =>
+                        complete({
+                          response:
+                            content.kind === "role_play" || content.kind === "reflection"
+                              ? written
+                              : content.kind === "code_lab"
+                                ? code
+                                : content.kind === "peer_review"
+                                  ? found.join(" | ")
+                                  : undefined,
+                          score: content.kind === "quiz" ? { correct: quizScore, total: content.questions.length } : undefined,
+                        })
+                      }
+                    >
+                      {pending ? "Saving…" : nextId ? "Complete and continue →" : "Complete"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

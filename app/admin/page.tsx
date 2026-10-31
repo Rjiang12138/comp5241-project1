@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
-import { getSession, requireRole } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { listCohorts, listInstructors } from "@/lib/store";
 import { assignInstructorAction, createCohortAction } from "./actions";
 
@@ -17,8 +17,7 @@ export const metadata = { title: "Cohorts — Praxis" };
  */
 
 export default async function AdminPage() {
-  await requireRole("admin");
-  const session = await getSession();
+  const session = await requireRole(["admin"], "/admin");
   const cohorts = await listCohorts();
   const instructors = await listInstructors();
   const instructorOptions = instructors.map((i) => ({ value: i.id, label: i.name }));

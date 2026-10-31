@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "My courses — Praxis" };
 
 export default async function CoursesPage() {
-  const session = await requireStaff();
+  const session = await requireStaff("/courses");
   const courses = await listCourses();
   const cohorts = new Set(courses.map((c) => c.cohortId).filter(Boolean)).size;
 

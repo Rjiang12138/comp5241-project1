@@ -16,7 +16,7 @@ function ago(date: Date): string {
 }
 
 export default async function StudioPage() {
-  const session = await requireStaff();
+  const session = await requireStaff("/studio");
   // Shown in the page head so the screen never claims to be model-backed when
   // no key is configured — the same honesty the generation log enforces.
   const model = llmConfigured() ? (process.env.OPENROUTER_MODEL ?? "free-tier chain") : "template-v1";

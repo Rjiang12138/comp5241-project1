@@ -67,7 +67,7 @@ export default async function CourseEditorPage({
   const { id } = await params;
   const query = await searchParams;
   const added = Number(query.roster) || 0;
-  const session = await requireStaff();
+  const session = await requireStaff(`/courses/${id}`);
   const course = await getCourse(id);
   if (!course) notFound();
 
