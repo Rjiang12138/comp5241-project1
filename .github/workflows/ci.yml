@@ -45,11 +45,12 @@ jobs:
           DATABASE_URL_UNPOOLED: postgresql://ci:ci@localhost:5432/ci
           NEXT_TELEMETRY_DISABLED: 1
 
-      - name: Check the prototype still matches the ported screens
+      - name: Check the design system has one owner
         run: |
-          # If prototype/css/styles.css changed without a re-port, the two
-          # versions of the design system have drifted. Warn, do not fail:
-          # the port is allowed to lag by one commit.
-          if git diff --name-only origin/main...HEAD | grep -q '^prototype/css/styles.css$'; then
-            echo "::warning::prototype/css/styles.css changed — re-run tools/html_to_tsx.py and copy it to app/globals.css"
+          # app/globals.css used to be a copy of prototype/css/styles.css, kept in
+          # step by re-running tools/html_to_tsx.py. The ported screens are gone
+          # and the prototype lives outside this repo, so the app owns the
+          # stylesheet now: warn if a change reintroduces a second copy.
+          if git diff --name-only origin/main...HEAD | grep -qE '^prototype/'; then
+            echo "::warning::a prototype/ file changed — app/globals.css is the only design system now"
           fi

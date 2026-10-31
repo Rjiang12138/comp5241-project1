@@ -68,11 +68,17 @@ POST /studio (multipart, ≤16 MB)
 
 Decisions worth defending in a viva:
 
-- **Two generators, one seam.** With `OPENROUTER_API_KEY` set, `completeJson` asks
+- **Two generators, one seam.** With a provider key set, `completeJson` asks
   a model for the module sequence and `coerceModules` validates the reply before
   it is saved. Without a key — or when every model in the chain fails — the
   built-in template runs instead. Both paths return the same type, so nothing
   downstream knows or cares which one ran. `GeneratedOutline.template` records it.
+- **Two providers, in a fixed order.** ChatAnywhere is asked first, OpenRouter is
+  the spare; a call only reaches the spare when the primary declined. Both are
+  free tiers, so the seam also owns the pacing: one queue, a minimum gap between
+  calls, `Retry-After` honoured on a 429, and a four-request budget for the whole
+  chain. The pipeline is allowed to be slow — a generation takes tens of seconds
+  and the screen shows the log while it happens.
 - **The fallback is not a silent one.** The studio's generation log names the
   model that answered, or says "fell back to the built-in template". The note in
   the right-hand column changes with it. A draft that cannot be traced to how it

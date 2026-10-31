@@ -166,6 +166,7 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-20 | Opening a finished course resumed on its last activity, with no way forward | major | fixed | §8.12 — a completion page that names the next step |
 | D-21 | Every activity in a generated course was rendered by `fallback()`, so a quiz asked "Which statement about <module title> is defensible?" with three obviously wrong options | blocker | fixed | §8.13 — bodies are written into `Activity.payload` at generation, publish, or on demand |
 | D-22 | Five of the six courses were real, complete, and unreachable: `/learn` always opened the first enrolment | blocker | fixed | §8.14 — all six published, the cohort enrolled in all six, and `/learn` is a shelf |
+| D-23 | `/` and `/studio` were still rendered from the prototype, with the course and cohort counts typed into the markup | major | fixed | §8.15 — both render through `Shell`, and `components/ported/` is gone |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -761,3 +762,50 @@ invented placeholders. With six, a path has six things to sequence.
 The 120 new enrolments carry no events. That is deliberate: a learner's progress
 is earned, and a fixture that invents five courses' worth of completions would be
 the same lie as the hard-coded 40% in D-17.
+
+### 8.15 One shell, and a model chain that waits its turn
+
+**D-23 — two screens were still rendered from the prototype.** `/` and
+`/studio` were built from components generated out of `prototype/index.html` and
+`prototype/studio.html`, so the studio carried a second, hand-maintained copy of
+the sidebar in which the course count was the literal `"6"` and the cohort count
+was the literal `"2"`. Neither number had been true since the catalogue changed,
+and there were two places to edit every time the navigation moved. The landing
+page listed one course's five modules by hand — a picture of a course rather
+than a course — and floated a completion figure whose only relationship to the
+database was that they were both percentages.
+
+Both pages now render through `components/Shell.tsx` like every other screen, and
+`components/ported/` is gone. The landing page reads the busiest course and
+prints its real modules, formats and minutes; the "+ N more modules" row is
+computed; the completion card is `courseAnalytics()`. The two absolutely
+positioned float cards became normal-flow cards, because a card whose height
+depends on how many modules a course has will eventually collide with something
+pinned to a corner — and it did, on the module-count pill.
+
+**The model seam now has two providers and a queue.** ChatAnywhere is asked
+first, OpenRouter is the spare. Both keys are free tiers, and a free tier that
+gets hammered stops answering, so the pacing lives in `lib/llm.ts` rather than in
+the callers:
+
+| Guard | What it does |
+| --- | --- |
+| One queue | every call is serialised; two activities never ask at once |
+| `LLM_MIN_GAP_MS` (4 s) | minimum gap between two calls, measured from the end of the last one |
+| 429 handling | waits the server's `Retry-After` (capped at 30 s), retries once, then moves on |
+| 401 / 403 | treated as fatal for that provider — retrying a bad key just burns quota |
+| Attempt budget | four requests for the whole chain, so a bad afternoon costs four and not twelve |
+| Timeout | 120 s per attempt; a free tier answers a 30-token prompt in ~13 s, so 90 s was cutting off replies that were still arriving |
+
+| Check | Before | After |
+| --- | --- | --- |
+| `/studio` sidebar course count | literal `6` | `courses.length` |
+| `/studio` sidebar cohort count | literal `2` | no badge — no page supplied a real number, so the badge was decoration that looked like data |
+| Landing "Draft outline" card | five hard-coded module titles | the busiest course's real modules, formats and minutes |
+| Landing float cards | overlapped the module-count pill once the card grew | normal flow, cannot collide |
+| Generation log line | `gpt-4o-mini · 4 modules` | `chatanywhere · gpt-4o-mini · 4 modules` — the spare is the thing to look at when a run is slow |
+| Model label on `/studio` | `OPENROUTER_MODEL ?? "free-tier chain"` | `ChatAnywhere · gpt-4o-mini · spare OpenRouter` |
+
+Measured, once, against the live free tier: a 30-token prompt answered in 13.0 s
+(`gpt-4o-mini-2024-07-18`), and a full `generateOutline()` from a one-sentence
+brief took **13.6 s** — 4 modules, 8 activities, 8 payloads, no retries.

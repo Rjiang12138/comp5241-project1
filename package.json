@@ -12,8 +12,7 @@
     "db:push": "dotenv -e .env.local -- prisma db push",
     "db:seed": "dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts",
     "db:studio": "dotenv -e .env.local -- prisma studio",
-    "db:reset": "dotenv -e .env.local -- prisma db push --force-reset && dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts",
-    "port:prototype": "python tools/html_to_tsx.py prototype/studio.html components/ported/Studio.tsx Studio"
+    "db:reset": "dotenv -e .env.local -- prisma db push --force-reset && dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts"
   },
   "dependencies": {
     "@neon/config": "^1.9.3",

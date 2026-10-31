@@ -54,72 +54,59 @@ the learners to see `/path` and `/learn`.
 | `/admin` | **cohorts and teaching assignments** | R3 |
 | `/login` | role switch | R3 |
 
-The prototype is still directly openable and is the thing to change first if a
-style needs to move:
-
-```bash
-python -m http.server 8080 --directory prototype
-# then visit http://localhost:8080
-```
-
-Screens: `index.html` (landing) · `studio.html` (instructor authoring) · `course.html` (course &
-cohort) · `learn.html` (learner code lab) · `analytics.html` (insights) · `path.html` (self-directed
-path builder).
-
 ## Repository layout
 
 ```
 app/                  Next.js App Router
-  globals.css         the design system, copied verbatim from prototype/css/styles.css
+  globals.css         the design system, carried over from the prototype's stylesheet
   additions.css       components the prototype did not have (editor, admin, sign-in)
+  page.tsx            landing — reads the busiest course, no hard-coded copy
   courses/            list + editor, with server actions in actions.ts
-  admin/              cohorts and teaching assignments
-  studio|learn|insights|path/   routes that mount the ported prototype screens
+  studio|learn|insights|path/   real screens, each rendered through components/Shell.tsx
 components/
-  Shell.tsx           sidebar + topbar, copied from prototype/course.html
-  ported/             prototype screens converted to JSX by tools/html_to_tsx.py
+  Shell.tsx           sidebar + topbar; every screen renders through it
+  StudioWorkspace.tsx the three-column generation screen
   AutoSubmitInput.tsx inline fields that save their form on blur
-  PrototypeScripts.tsx transitional: runs prototype/js/app.js behaviours app-wide
 lib/
   types.ts            domain types, mirroring prisma/schema.prisma
-  store.ts            data access — file-backed today, Prisma in week 10
+  store.ts            data access over Prisma
+  llm.ts              the model seam: ChatAnywhere, then OpenRouter, both throttled
+  generate.ts         deck or brief → outline → activities with bodies
+  author.ts           writes activity bodies from prose a course already has
   auth.ts             session + role guard
   format.ts           label/pill mapping
-prisma/schema.prisma  target data model (cohorts, courses, modules, activities, events, ai_runs)
-prototype/            the week 8 prototype — untouched, and the visual reference
+prisma/schema.prisma  data model (cohorts, courses, modules, activities, events, ai_runs)
+prototype/            the week 8 prototype, kept outside this repo as a visual reference
 docs/                 progress update, requirements, architecture, AI log, test plan, board guide
-tools/                html_to_tsx.py (prototype → JSX), trim_screenshots.py
 .github/              issue and PR templates, CI
 ```
 
-## How the two versions stay in step
+## What used to be here
 
-`prototype/` is the source of truth for the look. When a style has to change,
-change it there and re-run the converter — never hand-edit a ported screen:
+Weeks 9–10 converted the prototype's HTML into JSX and mounted it, so the app and
+the prototype could be compared side by side. Every screen has since been
+replaced by a real component and `components/ported/` is gone: `/studio` and `/`
+were the last two, and both were rendering a second copy of the sidebar with the
+course count typed into the markup. The design system in `app/globals.css` is the
+part worth keeping, and it is still the place to change a style.
 
-```bash
-cp prototype/css/styles.css app/globals.css
-python tools/html_to_tsx.py prototype/studio.html components/ported/Studio.tsx Studio
-```
-
-The converter copies markup verbatim and rewrites only what JSX requires. Screens
-that R2, R4 and R5 own will be replaced by real components in weeks 9–10; the
-generated files are a bridge, not the destination.
-
-## What works in the prototype
+## What works
 
 | Interaction | Where |
 | --- | --- |
-| Generate a course outline from a brief, with a step-by-step generation log | `studio.html` → **Generate outline** |
-| Switch audience (non-CS / CS / mixed) and session length | `studio.html` |
-| Inspect modules, per-activity completion, version history | `course.html` |
-| Toggle the AI tutor between plain / analogy / formal explanations | `learn.html` |
-| Run tests in the code lab (2 → 3 passing, checkpoint unlocks) | `learn.html` |
-| Reveal a staged hint | `learn.html` → **Ask for a hint** |
-| Regenerate a four-week learning path | `path.html` → **Design my path** |
+| Generate a course outline from a deck or a one-sentence brief, with a step-by-step generation log | `/studio` → **Generate outline** |
+| Write every activity's body — reading, cloze quiz, code lab, simulation, role play, peer review — from the material the course already has | automatic at generation and at publish, or **Fill activity bodies** on the editor |
+| Switch audience (non-CS / CS / mixed) and session length | `/studio` |
+| Inspect modules, per-activity completion, version history, cohort stats, roster import, CSV export | `/courses/[id]` |
+| Six published courses a learner can join and play, with progress read from the event log | `/learn` |
+| Toggle the AI tutor between plain / analogy / formal explanations; staged hints; code-lab checks | `/learn?course=…` |
+| Sequence existing courses into a four-week path, and mark the steps the library cannot fill | `/path` |
+| Cohort analytics over `events`, with a nudge list | `/insights` |
+| Cohorts and teaching assignments | `/admin` (admin only) |
+| Reset the demo data to the fixture | `/settings` |
 
-All data is seeded in the markup. There is no backend yet; this prototype exists to validate the
-interaction model and the information architecture before we commit to an implementation.
+Everything above reads and writes Postgres. There is no markup-only screen left;
+the prototype was a design reference and its ported components are gone.
 
 ## Team
 

@@ -6,10 +6,11 @@ import { cohortsHref } from "@/lib/nav";
 /**
  * The application shell.
  *
- * Markup is copied from prototype/course.html so a screen built here and a
- * screen still rendered from the prototype look identical side by side. The
- * only addition is the Admin entry, which appears for the admin role because
- * the brief's third role had no home in the mid-term prototype.
+ * Every screen renders through this, which is why the counts in the sidebar are
+ * props rather than numbers in the markup. It started life as a copy of
+ * `prototype/course.html` so the ported and unported screens could be compared
+ * side by side; the ported ones are gone now and this is the only shell, so it
+ * is the only place the navigation has to change.
  */
 
 export type NavKey = "studio" | "courses" | "insights" | "cohorts" | "paths" | "preview" | "settings" | "admin";
@@ -111,12 +112,14 @@ export function Sidebar({ session, active, courseCount }: { session: Session; ac
             {/* In the prototype "Cohorts" pointed at course.html, so it opened the
                 catalogue instead of a cohort screen. cohortsHref() decides where it
                 goes per role; see lib/nav.ts. */}
+            {/* No count badge: the prototype typed "2" into the markup, and no
+                page supplies a real number, so the badge was decoration that
+                looked like data. */}
             <NavLink
               name="cohorts"
               href={cohortsHref(session)}
               label="Cohorts"
               active={false}
-              count="2"
             />
 
             <div className="side-label">Workspace</div>

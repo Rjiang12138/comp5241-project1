@@ -450,7 +450,10 @@ export async function generateOutline(
       const projected = coerced.reduce((sum, module) => sum + module.estimatedMinutes, 0);
       steps.push({
         label: "Call language model",
-        detail: `${call.model} · ${coerced.length} modules · ${projected} min projected${call.fellBack ? " · first choice unavailable" : ""}`,
+        // Naming the provider matters now that there are two: "gpt-4o-mini" alone
+        // does not say whether the spare answered, and the spare is the thing to
+        // look at when a run is slow or a free tier is exhausted.
+        detail: `${call.provider} · ${call.model} · ${coerced.length} modules · ${projected} min projected${call.fellBack ? " · first choice unavailable" : ""}`,
         ms: call.ms,
       });
     } else {
