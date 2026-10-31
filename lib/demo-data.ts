@@ -70,7 +70,7 @@ const COURSES: Prisma.CourseCreateManyInput[] = [
     brief: "Turn a stakeholder conversation into a testable requirement set without inventing scope.",
     audience: "mixed",
     minutes: 38,
-    status: "draft",
+    status: "published",
     version: 1,
     ownerId: "u-kwok",
     code: "COMP5241",
@@ -96,7 +96,7 @@ const COURSES: Prisma.CourseCreateManyInput[] = [
     brief: "From a passing test suite to a suite that would actually catch the bug you are about to ship.",
     audience: "cs",
     minutes: 35,
-    status: "review",
+    status: "published",
     version: 1,
     ownerId: "u-kwok",
     code: "COMP5241",
@@ -109,7 +109,7 @@ const COURSES: Prisma.CourseCreateManyInput[] = [
     brief: "Choosing a shape for a system you will have to operate for two years, not two weeks.",
     audience: "cs",
     minutes: 50,
-    status: "draft",
+    status: "published",
     version: 1,
     ownerId: "u-chan",
     code: "COMP5241",
@@ -122,7 +122,7 @@ const COURSES: Prisma.CourseCreateManyInput[] = [
     brief: "Framing the problem before the solution: who is it for, what changes for them, how would you know.",
     audience: "non_cs",
     minutes: 30,
-    status: "draft",
+    status: "published",
     version: 1,
     ownerId: "u-kwok",
     code: "COMP5241",
@@ -338,14 +338,29 @@ export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
     ...learners.map((learner) => ({ ...learner, role: "learner" as const, locale: "en" })),
   ];
 
-  const enrolments: Prisma.EnrollmentCreateManyInput[] = learners.map((learner, index) => ({
-    id: `e-${index + 1}`,
-    courseId: "c-sef",
-    userId: learner.id,
-    cohortId: "co-l01",
-    importedFrom: "moodle",
-    createdAt: new Date("2026-09-20"),
-  }));
+  /**
+   * Six courses, six enrolments each.
+   *
+   * The demo used to publish one course and enrol the cohort in that one, which
+   * made `/learn` a single-course player and left the other five real, finished
+   * courses with no route to a learner. A learner who has not generated
+   * anything should still be able to study six things, so all six ship
+   * published and everyone starts enrolled in all six.
+   *
+   * `c-sef` keeps the plain `e-1…e-24` ids: the event log below already hangs
+   * off them, and rewriting a log to change an id format is not a trade worth
+   * making. The other five use `e-<n>-<courseId>`.
+   */
+  const enrolments: Prisma.EnrollmentCreateManyInput[] = learners.flatMap((learner, index) =>
+    COURSES.flatMap((course) => (course.id ? [course.id] : [])).map((courseId) => ({
+      id: courseId === "c-sef" ? `e-${index + 1}` : `e-${index + 1}-${courseId}`,
+      courseId,
+      userId: learner.id,
+      cohortId: "co-l01",
+      importedFrom: "moodle",
+      createdAt: new Date("2026-09-20"),
+    })),
+  );
 
   const events = buildEvents(learners);
 
@@ -391,8 +406,8 @@ export async function seedDemoData(prisma: PrismaClient): Promise<SeedSummary> {
         createdAt: new Date(createdAt),
       })),
     }),
-    // Everyone in the demo is enrolled in the one published course, so the
-    // cohort reads as the 24 the prototype describes. L02 exists but is empty:
+    // The whole cohort is enrolled in all six courses, so a learner who has
+    // generated nothing still has six things to study. L02 exists but is empty:
     // a newly created class is exactly what the admin screen is for.
     prisma.enrollment.createMany({ data: enrolments }),
 

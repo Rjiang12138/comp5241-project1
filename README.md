@@ -48,7 +48,7 @@ the learners to see `/path` and `/learn`.
 | `/courses` | course list | R3 |
 | `/courses/[id]` | **course editor** — modules, activities, ordering, publishing, versions, cohort stats, roster import, CSV export | R3 |
 | `/courses/[id]/versions` | version diff, only where a snapshot was written | R3 |
-| `/learn` | **learner runtime** — eight activity formats, hints, tutor, checkpoints | R2 |
+| `/learn` | **my courses** — the shelf of six published courses, then the player: eight activity formats, hints, tutor, checkpoints | R2 |
 | `/insights` | cohort analytics over the event log | R4 |
 | `/path` | self-directed path builder | R5 |
 | `/admin` | **cohorts and teaching assignments** | R3 |

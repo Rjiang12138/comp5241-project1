@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import LearnPlayer from "@/components/LearnPlayer";
 import { requireUser } from "@/lib/auth";
-import { PREVIEW_COOKIE, getLatestPath, getLearnerView, learnerCourseProgress, listPublishedCourses, previewLearner, recordStart } from "@/lib/store";
+import { PREVIEW_COOKIE, getLatestPath, getLearnerView, learnerCourseProgress, learnerShelf, listPublishedCourses, previewLearner, recordStart, type ShelfRow } from "@/lib/store";
 import { contentFor, FORMAT_LABEL } from "@/lib/activity-content";
 import { cyclePreviewAction, enrollAction } from "./actions";
 
@@ -24,6 +24,17 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
   const learnerId = preview ? await previewLearner(params.course, pinned) : session.userId;
 
   if (!learnerId) return <EmptyState learnerName={session.name} preview={preview} />;
+
+  // A learner arriving without a course is asking "what am I learning", not
+  // "resume something". The old answer — open the first enrolment — was right
+  // when one course was published and wrong as soon as there were six: the
+  // other five existed, were real, and had no way in. An instructor previewing
+  // still gets a course, because a preview of a shelf is a screenshot.
+  if (!preview && !params.course) {
+    const rows = await learnerShelf(session.userId);
+    if (rows.length === 0) return <EmptyState learnerName={session.name} preview={false} />;
+    return <Shelf learnerName={session.name} initials={session.initials} rows={rows} />;
+  }
 
   const view = await getLearnerView(learnerId, params.course);
   if (!view) return <EmptyState learnerName={session.name} preview={preview} />;
@@ -124,6 +135,116 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
       totalMinutes={flat.reduce((sum, row) => sum + row.activity.minutes, 0)}
       completedMinutes={completedMinutes}
     />
+  );
+}
+
+/**
+ * What a learner sees when they ask for "my learning".
+ *
+ * Six courses ship with the demo. Before this page, a learner who had never
+ * created a course landed inside one of them and could not reach the rest; the
+ * six were published, complete, and effectively invisible. The shelf lists
+ * everything they can open, with the number the event log actually supports —
+ * not a badge that says "in progress" because a row exists.
+ */
+function Shelf({ learnerName, initials, rows }: { learnerName: string; initials: string; rows: ShelfRow[] }) {
+  const started = rows.filter((row) => row.completed > 0).length;
+  const finished = rows.filter((row) => row.activities > 0 && row.completed >= row.activities).length;
+  const minutes = rows.reduce((sum, row) => sum + row.minutesDone, 0);
+
+  return (
+    <>
+      <div className="player-top">
+        <a className="exit" href="/" title="Home">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M15 5l-7 7 7 7" /></svg>
+        </a>
+        <div>
+          <div className="player-title">My learning</div>
+          <div className="player-sub">{learnerName}</div>
+        </div>
+        <div style={{ marginLeft: "auto" }} className="row">
+          <a className="btn btn-sm" href="/path">Build a path</a>
+          <span className="avatar">{initials}</span>
+        </div>
+      </div>
+
+      <div className="page" style={{ maxWidth: "1080px", margin: "0 auto" }}>
+        <div className="page-head">
+          <div>
+            <h1 style={{ fontSize: "24px" }}>My courses</h1>
+            <p>
+              {rows.length} courses are open to you. Every number here is read from the event log, so it is the same
+              number your instructor sees.
+            </p>
+          </div>
+          <span className="pill pill-teal">
+            {started} started · {finished} finished · {minutes} min logged
+          </span>
+        </div>
+
+        <div className="grid-2">
+          {rows.map((row) => {
+            const pct = row.activities === 0 ? 0 : Math.round((row.completed / row.activities) * 100);
+            const label = !row.enrolled
+              ? "Not joined"
+              : row.completed === 0
+                ? "Not started"
+                : row.completed >= row.activities
+                  ? "Finished"
+                  : "In progress";
+            const action = !row.enrolled
+              ? "Start"
+              : row.completed === 0
+                ? "Start"
+                : row.completed >= row.activities
+                  ? "Review"
+                  : "Continue";
+
+            return (
+              <div className="card card-pad" key={row.id}>
+                <div className="between" style={{ alignItems: "flex-start", gap: "12px" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: "14px", fontWeight: 600 }}>{row.title}</div>
+                    <div className="tiny muted" style={{ marginTop: "4px", lineHeight: 1.6 }}>{row.brief}</div>
+                  </div>
+                  <span className={`pill ${row.enrolled ? "pill-teal" : "pill-line"}`} style={{ flexShrink: 0 }}>
+                    {label}
+                  </span>
+                </div>
+
+                <div className="tiny muted" style={{ marginTop: "12px" }}>
+                  {row.modules} modules · {row.activities} activities · {row.minutes} min
+                </div>
+                <div className={`progress${pct === 100 ? " teal" : ""}`} style={{ marginTop: "8px" }}>
+                  <i style={{ width: `${pct}%` }} />
+                </div>
+                <div className="between" style={{ marginTop: "8px" }}>
+                  <span className="tiny muted">
+                    {row.completed} of {row.activities} done · {row.minutesDone} min logged
+                  </span>
+                  <span className="tiny" style={{ fontWeight: 600 }}>{pct}%</span>
+                </div>
+
+                <div className="row" style={{ marginTop: "14px" }}>
+                  {row.enrolled ? (
+                    <a className="btn btn-sm btn-primary" href={`/learn?course=${row.id}`}>
+                      {action}
+                    </a>
+                  ) : (
+                    <form action={enrollAction}>
+                      <input type="hidden" name="courseId" value={row.id} />
+                      <button className="btn btn-sm btn-primary" type="submit">
+                        {action}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -165,6 +165,7 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-19 | A deep link opened as Dr. R. Kwok without signing in; a learner pressing "Generate this course" was silently bounced to `/learn` | major | fixed | §8.12 — `requireUser()` and `/login?next=…` |
 | D-20 | Opening a finished course resumed on its last activity, with no way forward | major | fixed | §8.12 — a completion page that names the next step |
 | D-21 | Every activity in a generated course was rendered by `fallback()`, so a quiz asked "Which statement about <module title> is defensible?" with three obviously wrong options | blocker | fixed | §8.13 — bodies are written into `Activity.payload` at generation, publish, or on demand |
+| D-22 | Five of the six courses were real, complete, and unreachable: `/learn` always opened the first enrolment | blocker | fixed | §8.14 — all six published, the cohort enrolled in all six, and `/learn` is a shelf |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -408,8 +409,8 @@ it, so the screen and the player cannot disagree about what happened.
 
 | Check | Result |
 | --- | --- |
-| Course opened cold | the busiest course, not the alphabetically first one (which has no learners) |
-| Headline stats, all time | 24 learners · 96% active this week · 59% average progress · 2 of 24 finished · median 2.0 attempts · 69 tutor questions |
+| Course opened cold | the busiest course — most learners, then most events (six courses tie on 24 learners, so learner count alone is no longer a tie-break) |
+| Headline stats, all time | 24 learners · 96% active this week · 58% average progress · 2 of 24 finished · median 2.0 attempts · 69 tutor questions |
 | Weekly engagement | 0 · 0 · 0 · 21 · 46 · 71 · 92 · 96 |
 | Completion by format | Simulation 96% · Reading 88% · Code lab 63% · Peer review 46% · Role play 25% · Quiz 8% |
 | The insight | "Learners stop before module 5" — attributed to attrition because every quiz in the course sits in module 5 |
@@ -716,3 +717,47 @@ Current distribution across all 32 activities in the database: **22 hand-written
 10 template-filled, 0 on `fallback()`.** The ten are the activities of the course
 created during the week-9 session — five modules, two activities each — which has
 no hand-written text and therefore takes the template route end to end.
+
+### 8.14 Six courses, five of them without a door
+
+**D-22 — the catalogue existed; the route to it did not.** The fixture shipped
+six courses and published one. `getLearnerView()` answered "which course am I
+learning" with `enrolments[0]` — the first row by `createdAt` — which was exactly
+right while there was one enrolment per learner and became a wall as soon as
+there were more: a learner enrolled in all six always landed in the same course,
+and the other five were reachable only by typing `/learn?course=<id>`. The
+completion page offered them; a learner who had not finished anything saw
+nothing but the one course they had been dropped into.
+
+Two changes, in that order:
+
+1. **All six seed courses ship `published`, and the cohort is enrolled in all
+   six.** `c-sef` keeps the plain `e-1…e-24` enrolment ids because the fixture
+   event log already hangs off them; the other five use `e-<n>-<courseId>`. The
+   alternative — re-seeding — would have truncated a course the user generated
+   by hand, so the live database was migrated instead of reset.
+2. **`/learn` without a `?course=` is the shelf, not a course.** `learnerShelf()`
+   returns every course the learner can open, enrolled ones first, with the
+   completed count and minutes read from the event log — the same numbers
+   `/path` and `/insights` read. Order is "what should I do next": part-finished,
+   then joined-but-unopened, then not joined, then finished. `/learn?course=`
+   still opens the player, and an instructor previewing without a course still
+   gets a course, because a preview of a shelf is a screenshot.
+
+This also fixes the gap steps. `pathLibrary()` only draws from `published`, so
+with one published course a four-step path was one real course and three
+invented placeholders. With six, a path has six things to sequence.
+
+| Check | Before | After |
+| --- | --- | --- |
+| Learner opens `/learn` | course 1 of the one enrolment, other five invisible | "My courses" · 6 cards · `1 started · 0 finished · 39 min logged` |
+| A course they have not joined | not listed anywhere | listed as "Not joined" with a Start button that enrols and opens it |
+| A finished course on the shelf | unreachable without the completion page | "Finished" · 100% · Review |
+| `/learn?course=c-agent` | player | unchanged — player |
+| `/courses/[id]` → "Open learner view" | `/learn` (now the shelf) | `/learn?course=<id>` |
+| "Design my path" | 1 real course + 3 gap placeholders | six published courses to sequence |
+| Enrolments in the database | 24 | 144 (24 learners × 6 courses) |
+
+The 120 new enrolments carry no events. That is deliberate: a learner's progress
+is earned, and a fixture that invents five courses' worth of completions would be
+the same lie as the hard-coded 40% in D-17.

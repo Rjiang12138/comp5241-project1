@@ -106,7 +106,9 @@ export default async function CourseEditorPage({
             <span className="dot" />
             {statusLabel(course.status)}
           </span>
-          <Link className="btn btn-sm" href="/learn">
+          {/* Carries the course id: /learn without one is the learner's shelf,
+              and an instructor pressing this button asked to see *this* course. */}
+          <Link className="btn btn-sm" href={`/learn?course=${course.id}`}>
             Open learner view
           </Link>
           <Link className="btn btn-primary btn-sm" href="/insights">

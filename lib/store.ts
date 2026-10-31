@@ -608,6 +608,84 @@ export async function learnerCourseProgress(userId: string): Promise<Record<stri
   return out;
 }
 
+export type ShelfRow = {
+  id: string;
+  title: string;
+  brief: string;
+  modules: number;
+  activities: number;
+  minutes: number;
+  completed: number;
+  minutesDone: number;
+  /** False for a published course this learner has not joined yet. */
+  enrolled: boolean;
+};
+
+/**
+ * Everything one person can open, with how far they are through it.
+ *
+ * `/learn` used to answer "what am I learning" with "the first enrolment", which
+ * was correct while the demo had exactly one published course and became a lie
+ * the moment there were six: a learner enrolled in all six always landed in the
+ * same one, and the other five were reachable only by typing a URL. The shelf is
+ * the honest answer to the question the page is actually asking.
+ *
+ * Enrolled rows come first, then the published courses the learner has not
+ * joined. A course they are enrolled in stays on the shelf even if it is back in
+ * draft or review — un-publishing should stop new joiners, not evict people who
+ * are mid-course.
+ */
+export async function learnerShelf(userId: string): Promise<ShelfRow[]> {
+  const [courses, enrolments, progress] = await Promise.all([
+    prisma.course.findMany({
+      orderBy: { title: "asc" },
+      select: {
+        id: true,
+        title: true,
+        brief: true,
+        minutes: true,
+        status: true,
+        _count: { select: { modules: true } },
+        modules: { select: { activities: { select: { id: true, minutes: true } } } },
+      },
+    }),
+    prisma.enrollment.findMany({ where: { userId }, select: { courseId: true } }),
+    learnerCourseProgress(userId),
+  ]);
+
+  const joined = new Set(enrolments.map((row) => row.courseId));
+
+  /**
+   * Shelf order is "what should I do next", not "what is alphabetically first":
+   * a course you are part-way through, then one you joined and have not opened,
+   * then one you have not joined, then one you have finished.
+   */
+  const rank = (row: ShelfRow): number => {
+    if (!row.enrolled) return 2;
+    if (row.completed === 0) return 1;
+    return row.completed >= row.activities ? 3 : 0;
+  };
+
+  return courses
+    .filter((course) => joined.has(course.id) || course.status === "published")
+    .map((course) => {
+      const activities = course.modules.flatMap((module) => module.activities);
+      const row = progress[course.id];
+      return {
+        id: course.id,
+        title: course.title,
+        brief: course.brief,
+        modules: course._count.modules,
+        activities: activities.length,
+        minutes: course.minutes,
+        completed: row?.completed ?? 0,
+        minutesDone: row?.minutesDone ?? 0,
+        enrolled: joined.has(course.id),
+      };
+    })
+    .sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
+}
+
 /** Append one row to the event log. Nothing in the app ever updates one. */
 export async function recordEvent(input: {
   enrollmentId: string;
@@ -1295,11 +1373,37 @@ export async function nextPreviewLearner(courseId: string, currentId: string): P
  * of zeros and conclude the feature was broken. The busiest course is the one
  * with something to say.
  */
+/**
+ * The course the dashboards should open on: most learners, then most activity.
+ *
+ * Learner count alone was enough while one course was published, and stopped
+ * being enough the moment the catalogue was six courses deep and the whole
+ * cohort was enrolled in all six: every course tied on 24, the tie broke on
+ * whatever Postgres returned first, and `/insights` opened on a course nobody
+ * had touched — a dashboard of zeros that reads as a broken query.
+ */
 export async function courseWithMostLearners(): Promise<string | null> {
-  const rows = await prisma.course.findMany({
-    select: { id: true, _count: { select: { enrollments: true } } },
-    orderBy: { enrollments: { _count: "desc" } },
-    take: 1,
-  });
-  return rows[0]?.id ?? null;
+  const [courses, enrolments, events] = await Promise.all([
+    prisma.course.findMany({
+      select: { id: true, _count: { select: { enrollments: true } } },
+    }),
+    prisma.enrollment.findMany({ select: { id: true, courseId: true } }),
+    prisma.event.groupBy({ by: ["enrollmentId"], _count: { _all: true } }),
+  ]);
+  if (courses.length === 0) return null;
+
+  const courseOf = new Map(enrolments.map((row) => [row.id, row.courseId]));
+  const eventsByCourse = new Map<string, number>();
+  for (const row of events) {
+    const courseId = courseOf.get(row.enrollmentId);
+    if (!courseId) continue;
+    eventsByCourse.set(courseId, (eventsByCourse.get(courseId) ?? 0) + row._count._all);
+  }
+
+  return [...courses].sort(
+    (a, b) =>
+      b._count.enrollments - a._count.enrollments ||
+      (eventsByCourse.get(b.id) ?? 0) - (eventsByCourse.get(a.id) ?? 0) ||
+      a.id.localeCompare(b.id),
+  )[0].id;
 }
