@@ -1,24 +1,32 @@
 # Deployment
 
 Everything a new teammate — or a marker who wants to check our claims — needs to
-get Praxis running locally and on a public URL. Written for the week 9 skeleton;
-it gets a version bump whenever the deployment changes.
+get Praxis running locally and on a public URL. It gets a version bump whenever
+the deployment changes.
 
-Last verified: 2026-10-22, commit on `feat/platform-base`.
+Last verified: 2026-10-31, commit `d6f13bf` on `feat/platform-postgres`
+(local only — nothing is pushed yet, see §5).
 
 ---
 
 ## 1. What runs, and what is still mock
 
+Nothing on a screen is mock any more. Every page reads and writes Postgres
+through `lib/store.ts`; there is no fixture markup left, and the components that
+were generated from `prototype/*.html` have been deleted.
+
 | Area | State |
 | --- | --- |
-| App shell, routing, design system | real |
+| App shell, routing, design system | real — one shell, `components/Shell.tsx` |
+| Landing page | real — reads the busiest course and `courseAnalytics()` |
+| Studio (deck or brief → outline → activities with bodies) | real — one model call, then `lib/author.ts` |
 | Course editor (modules, activities, ordering, publishing, versions) | real — writes to Postgres |
-| Admin (create cohort, assign instructor) | real — writes to Postgres |
-| Session and role guard | real, demo provider (cookie) |
-| Studio generation log, learner code lab, insights charts, path builder | prototype markup, interactions from `prototype/js/app.js` |
+| Learner runtime (six published courses, six activity formats, tutor, hints, checks) | real — every click appends to `events` |
+| Path builder, insights, admin, settings | real — queries and writes, no counters |
+| Session and role guard | real, demo provider (a `praxis_uid` cookie; see §5) |
 | Database | **Postgres on Neon**, wired through Prisma |
-| LLM calls | **not wired yet** — no key is read anywhere in the app |
+| LLM calls | **wired** — ChatAnywhere first, OpenRouter as the spare (`lib/llm.ts`) |
+| Mini-games, narrated slides, language switching | **not built**, and the screens say so |
 
 Data lives in a Neon Postgres branch (`production`). `lib/store.ts` is the only
 module that talks to it; everything else speaks its signatures.
@@ -48,9 +56,10 @@ npm run dev                      # http://localhost:3000
 runtime reads it natively. Without `DATABASE_URL` the app starts but every page
 that queries will fail — there is no silent fallback to fixture data.
 
-Open <http://localhost:3000>. You land as **Dr. R. Kwok** (instructor) so nothing
-has to be set up to look around. `/login` switches role — pick **A. Tse** to see
-the admin console.
+Open <http://localhost:3000>. Every route except `/` asks who you are first, so
+you land on `/login` and pick an identity: **A. Tse** is the admin, **Dr. R.
+Kwok** and **Dr. M. Chan** are instructors, and three learners are listed under
+them. The choice is a cookie, not a password — see §5.
 
 Useful commands:
 
@@ -63,11 +72,10 @@ Useful commands:
 | `npm run db:seed` | wipe and reload the fixture data |
 | `npm run db:reset` | `db push --force-reset` + `db:seed` |
 | `npm run db:studio` | Prisma Studio against the Neon branch |
-| `npm run port:prototype` | re-run the HTML→JSX converter for one screen |
 
-The mid-term prototype is still in `prototype/` and still opens from the file
-system. It is the visual reference: **change the design there first**, then
-re-run the converter, so the two never drift.
+`prototype/` still holds the week 8 static prototype. It is a design reference
+and nothing in the app renders from it — `app/globals.css` is the only copy of
+the design system now, so a style change is made there and only there.
 
 ## 4. Environment variables
 
@@ -80,9 +88,17 @@ Copy `.env.example` to `.env.local`, or let the Neon CLI write it
 | `DATABASE_URL_UNPOOLED` | for DDL | Direct endpoint. `prisma db push` and migrations need it; PgBouncer cannot run DDL. |
 | `AUTH_SECRET` | no (week 10) | Cookie signing key for the real auth provider. `openssl rand -base64 32`. |
 | `NEXT_PUBLIC_APP_URL` | no | Absolute URLs in outbound links. Set to the deployed origin. |
-| `OPENROUTER_API_KEY` | no | Enables the model-backed path in the course generator. **Empty is a supported state**: `/studio` falls back to the built-in template and says so on screen. |
-| `OPENROUTER_MODEL` | no | Pins one model instead of the default free-tier chain (`poolside/laguna-s-2.1:free` → `nvidia/nemotron-3-ultra-550b-a55b:free`). |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | no (week 10) | Read by nothing yet. |
+| `CHATANYWHERE_API_KEY` | no | **Primary** model provider. Empty means the chain starts at OpenRouter. |
+| `CHATANYWHERE_BASE_URL` | no | Default `https://api.chatanywhere.tech/v1`. |
+| `CHATANYWHERE_MODEL` | no | Default `gpt-4o-mini`. |
+| `LLM_MIN_GAP_MS` | no | Minimum gap between two model calls, default `4000`. Raise it if a 429 shows up. |
+| `OPENROUTER_API_KEY` | no | The spare. Used only when the primary declines — no key, 429, bad key, empty reply. |
+| `OPENROUTER_MODEL` | no | Pins one model instead of the spare's free-tier chain. |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | no | Read by nothing. |
+
+Both keys being empty is a **supported state**: `/studio` falls back to the
+built-in template and the screen says `Model: template-v1`. Nothing else in the
+app calls a model.
 
 Never commit `.env.local`. `.gitignore` already covers `.env` and `.env*.local`;
 `.env.example` is the file that is meant to be committed.
@@ -93,12 +109,19 @@ One-time, about ten minutes. Two of those minutes are the environment variables 
 the build fails without them, because `next build` evaluates every page and every
 page reads the database through `getSession()`.
 
-1. Push `main` to GitHub.
-2. In Vercel: **Add New → Project → Import** `comp5241-project1`.
+**Current status: nothing is pushed.** `feat/platform-postgres` is 13 commits
+ahead of `origin/feat/platform-postgres` and 23 ahead of `main`, so Vercel cannot
+see any of the work described in this document until step 1 is done.
+
+1. Push the branch — `git push origin feat/platform-postgres`, or merge it into
+   `main` first if the review is done.
+2. In Vercel: **Add New → Project → Import** `comp5241-project1`, and set the
+   production branch to the one you pushed.
 3. Framework preset: **Next.js** (detected). Leave build command, output
    directory and install command at their defaults — `postinstall` already runs
    `prisma generate`, and `build` runs it again before `next build`.
-4. **Environment variables** — both are required, in Production *and* Preview:
+4. **Environment variables** — the two database strings are required, in
+   Production *and* Preview:
 
    | Name | Value |
    | --- | --- |
@@ -110,10 +133,11 @@ page reads the database through `getSession()`.
    but any page that renders does, and a missing variable surfaces as
    `Environment variable not found: DATABASE_URL` at build time.
 
-   Optionally add `OPENROUTER_API_KEY` as well. Without it the deployed studio
-   still generates courses, using the template; with it, generation calls a
-   model. Add it to Production and Preview separately — Vercel does not copy
-   variables between environments.
+   Then add the model keys, if you want generation to call a model on the
+   deployed URL: `CHATANYWHERE_API_KEY`, and optionally `OPENROUTER_API_KEY` as
+   the spare. Without either, the deployed studio still generates courses from
+   the template and the screen says so. Add them to Production and Preview
+   separately — Vercel does not copy variables between environments.
 
 5. **Deploy.**
 
@@ -122,6 +146,35 @@ the board links to the preview, so a reviewer can click a finished task and land
 on the thing it describes instead of reading a description of it.
 
 Production URL: `<fill in after the first deploy>`
+
+### Two things a serverless default will break
+
+**1. Function duration.** Vercel's default limit for a function is 10 s, and a
+generation measured on this machine takes **13.6 s** end to end — one model call
+plus the activity bodies. Without a higher limit the request is killed halfway
+and the studio shows a timeout rather than a course. Both routes that call a
+model therefore declare:
+
+```ts
+export const maxDuration = 60;   // app/studio/page.tsx, app/path/page.tsx
+```
+
+If your plan caps below 60, the number is a ceiling, not a promise: raise the
+plan's limit or expect generation to fail on the deployed URL and work locally.
+This is the single most likely thing to go wrong on the first deploy.
+
+**2. The throttle is per instance.** `lib/llm.ts` serialises calls through one
+in-memory queue and spaces them by `LLM_MIN_GAP_MS`. On a serverless platform
+each instance has its own memory, so two simultaneous visitors can be two
+instances and the queue cannot see the other one. The free tier's rate limit is
+per key, not per instance, so concurrent generation can still earn a 429.
+
+What that costs in practice: the 429 handler waits for `Retry-After` and retries
+once, so a collision is slow rather than broken. What would fix it properly is
+the queue moving out of process — a row lock or a `pg_advisory_lock` on the
+Neon database, which is already there. Not done, because the demo has one
+instructor generating at a time and the lock would be a second source of truth
+to reason about. Write it down rather than pretend the guard is global.
 
 ### Does the code have to be on GitHub first?
 
@@ -168,7 +221,14 @@ worth knowing before a demo. The one-line mitigation, if you want it, is to gate
 ### Deployment checklist (run before every merge to `main`)
 
 - [ ] `npm run build` passes locally
-- [ ] The preview URL opens and `/courses` renders six courses
+- [ ] The preview URL opens and `/courses` renders seven courses, six of them
+      published
+- [ ] `/learn` as a learner shows the shelf of six courses, not a single course
+- [ ] `/studio` → **Generate outline** finishes on the deployed URL. This is the
+      one that fails if `maxDuration` is missing or the plan caps below it: a
+      13.6 s generation against a 10 s limit dies halfway
+- [ ] `/studio` names the provider it will use (`ChatAnywhere · gpt-4o-mini` or
+      `template-v1`), and the name matches the keys you actually set
 - [ ] The preview root (`/`) shows the Praxis workspace, **not** the static
       `index.html` that GitHub Pages uses — if it shows the static one, the
       project was detected as "Other" instead of "Next.js"
@@ -234,9 +294,17 @@ history is part of the evidence we are graded on.
 
 ## 9. What this deployment does *not* do yet
 
-- No real authentication — the session cookie is unsigned and names a demo user.
-- No code execution sandbox — the code lab is still a prototype screen.
-- No LLM calls — nothing in the app reads an API key.
-- No automated end-to-end suite — `docs/test-plan.md` specifies it, week 10 writes it.
+- **No real authentication.** The session cookie is unsigned and names a demo
+  user, so anyone who can set `praxis_uid` is whoever they name — including the
+  admin. Fine for a marked demo, not for real students.
+- **No code execution sandbox.** The code lab's "Run checks" is a substring test
+  over the editor contents (`mustInclude`), not a test run. It can tell that a
+  learner wrote the right call; it cannot tell that the call works.
+- **No cross-instance rate limit.** `lib/llm.ts` serialises calls in memory, which
+  is one queue per process. See §5 for what that means on a serverless platform.
+- **No automated end-to-end suite.** `docs/test-plan.md` specifies it; the
+  manual smoke run in §5 is what stands in for it.
+- **Mini-games, narrated slides, language switching.** Modelled in the schema and
+  the copy, deliberately unbuilt, and every screen that mentions them says so.
 
-Each of these is a named week 10 task on the board, not an oversight.
+Each of these is a named task on the board, not an oversight.

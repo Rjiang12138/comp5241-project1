@@ -18,8 +18,10 @@ not a playlist — they can also generate their own.
 > slides. The screens say so instead of showing an empty card. Language switching
 > is English-only for the same reason — it is stated, not implied.
 >
-> The mid-term prototype is untouched in [`prototype/`](prototype) and remains
-> the visual reference for every screen.
+> The mid-term prototype is kept in [`prototype/`](prototype) as a design
+> reference. Nothing in the app renders from it: the components generated from
+> those pages have been replaced by real ones, and `app/globals.css` is now the
+> only copy of the design system.
 
 ![Landing page](docs/screenshots/index.png)
 
@@ -76,7 +78,7 @@ lib/
   auth.ts             session + role guard
   format.ts           label/pill mapping
 prisma/schema.prisma  data model (cohorts, courses, modules, activities, events, ai_runs)
-prototype/            the week 8 prototype, kept outside this repo as a visual reference
+prototype/            the week 8 static prototype, kept as a design reference (nothing renders from it)
 docs/                 progress update, requirements, architecture, AI log, test plan, board guide
 .github/              issue and PR templates, CI
 ```

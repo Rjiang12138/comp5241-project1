@@ -7,6 +7,13 @@ import { lastTouchedCourse, listCourses } from "@/lib/store";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Studio — Praxis" };
 
+/**
+ * Generating an outline is one model call plus the activity bodies, measured at
+ * 13.6 s. Serverless platforms default to 10 s, which would kill the request
+ * halfway and show a timeout instead of a course.
+ */
+export const maxDuration = 60;
+
 function ago(date: Date): string {
   const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
   if (minutes < 1) return "just now";

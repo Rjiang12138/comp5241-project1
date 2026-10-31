@@ -13,6 +13,9 @@ import {
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Learning path — Praxis" };
 
+/** "Design my path" asks a model to sequence the library; same ceiling as /studio. */
+export const maxDuration = 60;
+
 type Search = { generated?: string; error?: string };
 
 const DOMAIN_LABEL: Record<string, string> = {
