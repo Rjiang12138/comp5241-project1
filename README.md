@@ -7,6 +7,14 @@ one-paragraph brief; Praxis drafts the module sequence, builds the activities (c
 stakeholder simulations), and adapts the wording to each learner's background. Learners get a path,
 not a playlist — they can also generate their own.
 
+> **New to this branch?** Read [`HANDOVER.md`](HANDOVER.md) first. It explains what
+> this branch is, the two tagged starting points (`v0.0-skeleton` and the
+> working tip), and what you have to configure yourself before it runs —
+> a database and, optionally, a model key.
+>
+> **Editing it?** [`AGENTS.md`](AGENTS.md) has the invariants and the traps. It is
+> written for an AI agent but every rule in it applies to a human too.
+
 > **Status: the platform runs end to end.**
 > A deck or a brief goes in at `/studio`, a course comes out, learners play it at
 > `/learn`, and every click writes an `Event` that `/insights` and the course

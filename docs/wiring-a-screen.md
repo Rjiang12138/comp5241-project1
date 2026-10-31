@@ -1,8 +1,8 @@
 # Wiring a screen
 
 Owner: R3 platform. Read this before adding behaviour to any screen under
-`components/ported/`. The course editor is the reference implementation — every
-pattern below is copied from working code, not proposed.
+`app/`. The course editor is the reference implementation — every pattern below
+is copied from working code, not proposed.
 
 The point of this document is that four people can fill four screens without
 inventing four architectures. If a screen needs something this document does not
