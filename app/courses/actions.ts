@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import {
   addActivity,
   addModule,
+  fillActivityContent,
   importRoster,
   moveModule,
   publishCourse,
@@ -112,8 +113,29 @@ export async function removeActivityAction(formData: FormData): Promise<void> {
 export async function publishCourseAction(formData: FormData): Promise<void> {
   await requireStaff();
   const courseId = str(formData, "courseId");
+  // Publishing is the promise that a course is worth a learner's time, so it is
+  // also the point where a course with no activity bodies gets them. Filling
+  // after publish would ship the generic template to whoever enrolled first.
+  await fillActivityContent(courseId);
   await publishCourse(courseId);
   refresh(courseId);
+}
+
+/**
+ * Write activity bodies for a course that has none.
+ *
+ * Offered in the editor because a draft can sit with structure and no content
+ * and look finished: every activity opens, every format renders, and every quiz
+ * asks the same generic question. This fills from the module objectives — the
+ * only text such a course still owns — and reports how many it wrote.
+ */
+export async function fillContentAction(formData: FormData): Promise<void> {
+  await requireStaff();
+  const courseId = str(formData, "courseId");
+  const written = await fillActivityContent(courseId);
+  refresh(courseId);
+  revalidatePath("/learn");
+  redirect(`/courses/${courseId}?filled=${written}`);
 }
 
 /**

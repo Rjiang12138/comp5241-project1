@@ -8,6 +8,7 @@ import { courseAnalytics, courseMinutes, getCourse, learnerProgress } from "@/li
 import {
   addActivityAction,
   addModuleAction,
+  fillContentAction,
   importRosterAction,
   moveModuleAction,
   publishCourseAction,
@@ -62,11 +63,12 @@ export default async function CourseEditorPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ roster?: string }>;
+  searchParams: Promise<{ roster?: string; filled?: string }>;
 }) {
   const { id } = await params;
   const query = await searchParams;
   const added = Number(query.roster) || 0;
+  const filled = query.filled === undefined ? null : Number(query.filled) || 0;
   const session = await requireStaff(`/courses/${id}`);
   const course = await getCourse(id);
   if (!course) notFound();
@@ -122,6 +124,16 @@ export default async function CourseEditorPage({
           </p>
         </div>
         <div className="row">
+          <form action={fillContentAction}>
+            <input type="hidden" name="courseId" value={course.id} />
+            <button
+              className="btn btn-sm"
+              type="submit"
+              title="Write a body for every activity that has none, from the module objectives"
+            >
+              Fill activity bodies
+            </button>
+          </form>
           <form action={publishCourseAction}>
             <input type="hidden" name="courseId" value={course.id} />
             <button className="btn btn-sm btn-primary" type="submit">
@@ -130,6 +142,19 @@ export default async function CourseEditorPage({
           </form>
         </div>
       </div>
+
+      {filled !== null ? (
+        <div
+          className="card card-pad"
+          style={{ marginBottom: "16px", background: "var(--teal-soft)", borderColor: "#99f6e4" }}
+        >
+          <div className="tiny" style={{ lineHeight: 1.6 }}>
+            {filled === 0
+              ? "Every activity already has a body — nothing was written."
+              : `Wrote ${filled} activity ${filled === 1 ? "body" : "bodies"} from the module objectives. Open the course in the learner view to read them.`}
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid-4" style={{ marginBottom: "16px" }}>
         <div className="stat">

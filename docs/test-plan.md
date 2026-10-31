@@ -164,6 +164,7 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-18 | "Complete and continue" left the learner on the finished activity, button now reading "Completed" | blocker | fixed | §8.12 — the action redirects instead of racing a client push |
 | D-19 | A deep link opened as Dr. R. Kwok without signing in; a learner pressing "Generate this course" was silently bounced to `/learn` | major | fixed | §8.12 — `requireUser()` and `/login?next=…` |
 | D-20 | Opening a finished course resumed on its last activity, with no way forward | major | fixed | §8.12 — a completion page that names the next step |
+| D-21 | Every activity in a generated course was rendered by `fallback()`, so a quiz asked "Which statement about <module title> is defensible?" with three obviously wrong options | blocker | fixed | §8.13 — bodies are written into `Activity.payload` at generation, publish, or on demand |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
@@ -641,3 +642,77 @@ disabled label.
 
 Test events written while checking D-18 were deleted afterwards; the cohort's
 completion counts are back to their seeded values.
+
+### 8.13 The course was real; the activities were a question about a question
+
+**D-21 — the body was written at render time.** `contentFor()` has always had a
+three-tier priority: hand-written text, then the activity's `payload`, then
+`fallback()`. The fixture course used the first tier. Generated courses were
+supposed to use the second — but the generation pipeline only ever wrote
+`title`, `format`, and `position`, never `payload`. So every generated activity
+fell through to `fallback()`, which reads `module.title` and `module.objective`
+and prints a question about them:
+
+> Which statement about *Working with an AI coding agent* is defensible?
+> A. It is settled practice and does not need justification…
+> B. It depends on constraints that the module objective names: …
+> C. It only matters for large teams.
+> D. It is a tooling choice with no effect on the outcome.
+
+Option B quotes the objective, so it is always the answer, and the other three
+are never tempting. A learner can finish the whole course without reading
+anything. The screen was not broken — it was honest about a course that had no
+content in it.
+
+The fix does not call the model a second time. The outline step already carries
+the prose: a module has a title, an objective, and a `sourceSection` pointing at
+the lecture text it was drawn from. `lib/author.ts` turns that into the six
+formats the player understands:
+
+- **reading** — the section's own paragraphs, with the objective as the closing line.
+- **quiz** — cloze questions over the section's sentences; the blanked word is
+  drawn from that section's frequent terms, each term used once, and the four
+  options are shuffled by a hash of the activity id so the answer is not always
+  in slot two.
+- **code_lab** — the task is "prove the objective", with checks that name the
+  symbols and the behaviour, not `mustInclude: []`.
+- **simulation** — the section's situation plus three options, the defensible one
+  moved by the same hash.
+- **role_play** — an opening line that disputes the module's claim, and a rubric.
+- **peer_review** — a diff built from the module, with findings that point at real
+  lines in it.
+
+`matchSection()` picks the source section by title-word overlap (threshold 0.34,
+each section consumed once, in module order) so two modules drawn from the same
+lecture do not get the same paragraphs.
+
+It runs in three places, because a course can reach a learner by three routes:
+
+| Route | Where the bodies are written |
+| --- | --- |
+| Generate a course | the "Write activity bodies" step, between "Match activity formats" and the summary; the payload rides along in the same nested create |
+| Publish a draft | `publishCourseAction` calls `fillActivityContent()` first — a published course cannot be empty |
+| An older draft, by hand | the "Fill activity bodies" button on `/courses/[id]`, which reports `?filled=N` |
+
+`fillActivityContent()` is idempotent: it skips any activity that already has a
+payload or is hand-written in `AUTHORED`, so pressing the button twice writes
+nothing the second time.
+
+| Check | Before | After |
+| --- | --- | --- |
+| `c-agent` module 1 reading | "This activity has no authored text yet." | "The window is a budget, not a limit" — the lecture's own paragraphs |
+| `c-agent` code lab | `checks: [{ mustInclude: [] }]` | three named tasks and checks that assert on the return value |
+| `c-agent` peer review | a two-line fake diff | a real diff with three findings |
+| Quiz in a user-built course | "Which statement about <module> is defensible?" | "Which of these does 'Types of Software Requirements' claim?" with four specific options |
+| Activities whose body comes from `fallback()` | 25 | 0 |
+
+The fixture course is the exception on purpose. Its seven activities are written
+by hand in `activity-content.ts` and read better than anything a template can
+produce, so the backfill skips them. Their stale `payload` rows were cleared, so
+the priority order stays honest: hand-written text is tier one, not shadowed by
+tier two.
+
+Current distribution across all 32 activities in the database: **22 hand-written,
+10 template-filled, 0 on `fallback()`.** The ten are the activities of the course
+created during the week-9 session — five modules, two activities each — which has
+no hand-written text and therefore takes the template route end to end.

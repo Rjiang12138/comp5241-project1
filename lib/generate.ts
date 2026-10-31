@@ -1,5 +1,7 @@
 import { extractText, getDocumentProxy } from "unpdf";
 import { completeJson, llmConfigured } from "./llm";
+import { authorContent, matchSection } from "./author";
+import type { ActivityContent } from "./activity-content";
 
 /**
  * Turning an instructor's own material into a draft outline.
@@ -22,6 +24,12 @@ export type OutlineActivity = {
   title: string;
   format: "reading" | "simulation" | "code_lab" | "role_play" | "quiz";
   minutes: number;
+  /**
+   * The activity's body, written from the source section at generation time.
+   * Stored on the row so the course does not depend on `contentFor`'s fallback
+   * — which is what used to make every generated course read the same.
+   */
+  payload?: ActivityContent;
 };
 
 export type OutlineModule = {
@@ -473,6 +481,48 @@ export async function generateOutline(
   steps.push({
     label: "Match activity formats",
     detail: `${activityCount} activities · ${handsOn} hands-on · ${options.audience.replace("_", "-")} audience`,
+    ms: Date.now() - started,
+  });
+
+  /*
+   * Write the bodies.
+   *
+   * Up to here the outline is a table of contents: module titles, objectives,
+   * and an activity format per row. The player could render that — `contentFor`
+   * fills anything missing from a template — but every generated course then
+   * read as the same generic quiz about a different noun. The text that makes
+   * it a course is already in `seeds`: each module came from a section of the
+   * deck, and that section has a title and a body. No second model call, no
+   * invented facts — the reading quotes the slides, and the quiz blanks a term
+   * from a sentence that is in the reading.
+   */
+  started = Date.now();
+  const usedSections = new Set<number>();
+  const objectives = modules.map((module) => module.objective);
+  modules = modules.map((module) => {
+    const index = matchSection(module.title, seeds, usedSections);
+    if (index !== null) usedSections.add(index);
+    const section = index !== null ? { title: seeds[index].title, body: seeds[index].body } : null;
+
+    return {
+      ...module,
+      activities: module.activities.map((activity) => ({
+        ...activity,
+        payload: authorContent({
+          format: activity.format,
+          title: activity.title,
+          moduleTitle: module.title,
+          objective: module.objective,
+          courseTitle: options.title,
+          section,
+          siblings: objectives.filter((objective) => objective !== module.objective),
+        }),
+      })),
+    };
+  });
+  steps.push({
+    label: "Write activity bodies",
+    detail: `${activityCount} activities · ${usedSections.size} sections quoted · ${fromBrief ? "brief as source" : "deck as source"}`,
     ms: Date.now() - started,
   });
 

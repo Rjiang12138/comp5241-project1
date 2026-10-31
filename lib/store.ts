@@ -1,6 +1,8 @@
 import { prisma } from "./db";
 import type { Prisma } from "@prisma/client";
 import type { GeneratedOutline } from "./generate";
+import { authorContent } from "./author";
+import { hasAuthoredContent } from "./activity-content";
 import type {
   Activity,
   ActivityFormat,
@@ -257,6 +259,64 @@ export async function removeActivity(activityId: string): Promise<void> {
 }
 
 /** Publishing is a gate, not a toggle: it records a version row every time. */
+/**
+ * Write activity bodies for a course that has none.
+ *
+ * Courses generated before the authoring step existed have structure and no
+ * content: their activities fall through to `contentFor`'s generic template,
+ * which is why every one of them asks "which statement about <module> is
+ * defensible". The source deck is long gone by now, so this fills from what the
+ * course still holds — the module objective, which the instructor wrote or
+ * approved — rather than pretending to quote material it cannot see.
+ *
+ * Hand-authored activities are skipped: their content lives in
+ * `activity-content.ts` and a payload would only shadow it.
+ */
+export async function fillActivityContent(courseId: string): Promise<number> {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: {
+      title: true,
+      modules: {
+        orderBy: { position: "asc" },
+        select: {
+          title: true,
+          objective: true,
+          activities: { select: { id: true, title: true, format: true, payload: true } },
+        },
+      },
+    },
+  });
+  if (!course) return 0;
+
+  const objectives = course.modules.map((module) => module.objective);
+  let written = 0;
+
+  for (const module of course.modules) {
+    for (const activity of module.activities) {
+      if (activity.payload || hasAuthoredContent(activity.id)) continue;
+
+      const payload = authorContent({
+        format: activity.format,
+        title: activity.title,
+        moduleTitle: module.title,
+        objective: module.objective,
+        courseTitle: course.title,
+        section: null,
+        siblings: objectives.filter((objective) => objective !== module.objective),
+      });
+
+      await prisma.activity.update({
+        where: { id: activity.id },
+        data: { payload: payload as unknown as Prisma.InputJsonValue },
+      });
+      written += 1;
+    }
+  }
+
+  return written;
+}
+
 export async function publishCourse(courseId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const current = await tx.course.findUnique({
@@ -367,6 +427,10 @@ export async function createCourseFromOutline(input: {
               title: activity.title,
               format: activity.format,
               minutes: activity.minutes,
+              // The body the generator wrote from the source section. Storing it
+              // is what makes the course a course rather than an outline that
+              // `contentFor` dresses up at render time.
+              payload: activity.payload ? (activity.payload as unknown as Prisma.InputJsonValue) : undefined,
             })),
           },
         })),
