@@ -4,8 +4,8 @@ Everything a new teammate — or a marker who wants to check our claims — need
 get Praxis running locally and on a public URL. It gets a version bump whenever
 the deployment changes.
 
-Last verified: 2026-10-31, commit `d6f13bf` on `feat/platform-postgres`
-(local only — nothing is pushed yet, see §5).
+Last verified: 2026-10-31, commit `cebeb3e` on `feat/end-to-end-prototype`
+(`v1.2-handover`).
 
 ---
 
@@ -109,12 +109,13 @@ One-time, about ten minutes. Two of those minutes are the environment variables 
 the build fails without them, because `next build` evaluates every page and every
 page reads the database through `getSession()`.
 
-**Current status: nothing is pushed.** `feat/platform-postgres` is 13 commits
-ahead of `origin/feat/platform-postgres` and 23 ahead of `main`, so Vercel cannot
-see any of the work described in this document until step 1 is done.
+**Current status: pushed, not merged.** `feat/end-to-end-prototype` is on origin
+and 24 commits ahead of `main`, which still holds the mid-term prototype. Vercel
+can build the branch directly; nothing has to be merged first.
 
-1. Push the branch — `git push origin feat/platform-postgres`, or merge it into
-   `main` first if the review is done.
+1. If you are deploying your own copy, push the branch you want built —
+   `git push origin feat/end-to-end-prototype`. If the review is done, merge it
+   into `main` and deploy that instead; the two are the same code.
 2. In Vercel: **Add New → Project → Import** `comp5241-project1`, and set the
    production branch to the one you pushed.
 3. Framework preset: **Next.js** (detected). Leave build command, output

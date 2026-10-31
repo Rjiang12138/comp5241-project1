@@ -1,6 +1,6 @@
 # Handover — read this before you build on the branch
 
-**Short version.** `feat/platform-postgres` now holds a working end-to-end
+**Short version.** `feat/end-to-end-prototype` holds a working end-to-end
 prototype. It was built by the owner of the platform task, outside the split we
 agreed in week 9, as a floor to stand on rather than a replacement for anyone's
 part. Two starting points are tagged so the team can choose; see §2.
@@ -31,24 +31,41 @@ generator, no mini-games. It is not the final product and it does not try to be.
 | Start from | Command | What you get |
 | --- | --- | --- |
 | **The week 9 skeleton** | `git checkout v0.0-skeleton` | Exactly what was on this branch before the platform work: shell, routing, session guard, schema, CI, docs. Screens still rendered from `prototype/*.html`. Nothing wired to a model. |
-| **This branch's tip** | `git checkout feat/platform-postgres` | The working prototype: every screen real, six published courses, generation wired, learner runtime writing events. |
+| **This branch's tip** | `git checkout feat/end-to-end-prototype` | The working prototype: every screen real, six published courses, generation wired, learner runtime writing events. |
 
 To see the distance between them:
 
 ```bash
-git diff v0.0-skeleton..feat/platform-postgres --stat
+git diff v0.0-skeleton..feat/end-to-end-prototype --stat
 ```
 
 To take **one part** of it without taking all of it — for example the model seam
 and the activity author, but not the learner runtime:
 
 ```bash
-git checkout feat/platform-postgres -- lib/llm.ts lib/author.ts lib/generate.ts
+git checkout feat/end-to-end-prototype -- lib/llm.ts lib/author.ts lib/generate.ts
 ```
 
 That is a legitimate way to use this branch. Nothing in it depends on the screens
 being the ones that shipped here, except `components/Shell.tsx` (every page
 imports it) and the `contentFor()` priority order described in `AGENTS.md`.
+
+### Why the work is not on `feat/platform-postgres`
+
+It was, for about ten minutes. That branch is the platform task — shell, routing,
+session guard, Postgres — and this work is the whole app, so leaving it there
+would have made the branch name a lie and made "what changed in the platform
+work?" unanswerable without reading 15 commits.
+
+`feat/platform-postgres` has been put back to `v0.0-skeleton` (`f5c2312`) and now
+means what it says again. If you had it checked out, reset it:
+
+```bash
+git fetch origin && git reset --hard origin/feat/platform-postgres
+```
+
+Nothing was lost in the move: `v0.0-skeleton` and `feat/end-to-end-prototype`
+point at the two ends, and `v1.2-handover` marks this exact state.
 
 If the team would rather not carry any of it, `v0.0-skeleton` is a complete,
 building, CI-passing starting point on its own. Nothing is lost by ignoring this
