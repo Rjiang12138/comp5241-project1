@@ -389,9 +389,23 @@ export default function LearnPlayer(props: Props) {
                       Check answers
                     </button>
                   ) : (
-                    <div className="tiny muted">
-                      {quizScore} of {content.questions.length} correct
-                      {quizScore === content.questions.length ? " — you can mark this complete." : " — review the explanations, then try the next activity."}
+                    <div className="stack">
+                      <div className="tiny muted">
+                        {quizScore} of {content.questions.length} correct
+                        {quizScore === content.questions.length ? " — you can mark this complete." : " — review the explanations, then try again."}
+                      </div>
+                      {quizScore < content.questions.length ? (
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={() => {
+                            setQuizAnswers({});
+                            setQuizSubmitted(false);
+                          }}
+                        >
+                          Try again
+                        </button>
+                      ) : null}
                     </div>
                   )}
                 </div>

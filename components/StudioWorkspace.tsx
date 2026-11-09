@@ -5,6 +5,7 @@ import { generateCourseAction } from "@/app/studio/actions";
 import { initialStudioState } from "@/app/studio/state";
 import StudioBrief from "@/components/StudioBrief";
 import type { OutlineActivity, OutlineModule } from "@/lib/generate";
+import type { recentUnattachedAiRuns } from "@/lib/store";
 
 /**
  * The three-column body of the studio screen.
@@ -56,7 +57,18 @@ function pedagogy(modules: OutlineModule[]): { label: string; ok: boolean }[] {
   ];
 }
 
-export default function StudioWorkspace() {
+function attemptDetails(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const data = value as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof data.fileName === "string") parts.push(data.fileName);
+  if (Array.isArray(data.pages) && data.pages.every((page) => Number.isInteger(page) && page > 0)) parts.push(`PDF pages ${data.pages.join(", ")}`);
+  if (typeof data.reason === "string") parts.push(data.reason);
+  if (typeof data.httpStatus === "number") parts.push(`HTTP ${data.httpStatus}`);
+  return parts.join(" · ");
+}
+
+export default function StudioWorkspace({ recentAttempts = [] }: { recentAttempts?: Awaited<ReturnType<typeof recentUnattachedAiRuns>> }) {
   const [state, formAction, pending] = useActionState(generateCourseAction, initialStudioState);
   const outline = state.outline;
   const modules = outline?.modules ?? [];
@@ -148,7 +160,10 @@ export default function StudioWorkspace() {
             <div className="between">
               <div className="row tiny muted">
                 <span>◈</span> Generated from {outline.sources.length} source
-                {outline.sources.length === 1 ? "" : "s"} · {pages} pages · no external content
+                {outline.sources.length === 1 ? "" : "s"} · {pages} pages
+                {outline.sources.some((source) => source.visualPages?.length)
+                  ? ` · AI read ${outline.sources.reduce((sum, source) => sum + (source.visualPages?.length ?? 0), 0)} visual pages`
+                  : " · no visual interpretation"}
               </div>
               <div className="row">
                 <a className="btn btn-sm btn-primary" href={`/courses/${state.courseId}`}>
@@ -161,6 +176,21 @@ export default function StudioWorkspace() {
       </div>
 
       <div className="stack">
+        {recentAttempts.length > 0 ? (
+          <div className="card">
+            <div className="card-head"><h3>Recent attempts without a course</h3></div>
+            <div className="card-body" style={{ fontSize: "12px", lineHeight: 1.6 }}>
+              {recentAttempts.map((run) => (
+                <div key={run.id} style={{ marginBottom: "10px" }}>
+                  <b>{run.purpose === "vision" ? "PDF visual analysis" : "Course outline"}</b> · {run.outcome}<br />
+                  {run.provider ?? "provider unknown"} · {run.model}<br />
+                  <span className="tiny muted">{run.createdAt.slice(0, 10)} · {(run.latencyMs / 1000).toFixed(1)} s · input {run.tokensIn ?? "unknown"} · output {run.tokensOut ?? "unknown"} tokens · cost unknown<br />Prompt {run.promptVersion}</span>
+                  {attemptDetails(run.metadata) ? <div className="tiny muted">{attemptDetails(run.metadata)}</div> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="card">
           <div className="card-head">
             <h3>Generation log</h3>
@@ -182,12 +212,12 @@ export default function StudioWorkspace() {
               </div>
             ) : (
               <div className="tiny muted" style={{ lineHeight: 1.6 }}>
-                Steps appear here as they run, with the time each one took.
+                Steps appear after generation, with the time each one took.
               </div>
             )}
             <div className="footnote" style={{ marginTop: "10px" }}>
-              Every step is logged so the draft can be audited later — the run is also written to{" "}
-              <span className="mono">ai_runs</span>.
+              The course editor keeps the model, prompt version and available token counts for each recorded attempt.
+              Teacher review is recorded when the reviewed course is published.
             </div>
           </div>
         </div>
@@ -224,8 +254,8 @@ export default function StudioWorkspace() {
             {!outline ? (
               <>
                 The draft is generated from <b>your own material</b> — a deck, or the brief if you have none. Module
-                titles come from what you supplied, and nothing leaves the machine except those titles and first lines,
-                if a model is configured.
+                titles come from what you supplied. Source excerpts and, when enabled, rendered PDF pages are sent
+                to the configured AI provider. Visual interpretations are labelled and need your review.
               </>
             ) : outline.template ? (
               fromBrief ? (
@@ -238,16 +268,16 @@ export default function StudioWorkspace() {
               ) : (
                 <>
                   This draft is <b>template-based</b>: titles come from your slides, objectives from the first line
-                  under each title, and minutes are split across whatever you asked for. No text was invented — which
-                  is why it reads like an index of the deck. Add a key to let a model design the sequence instead.
+                  under each title, and minutes are split across whatever you asked for. Any AI visual interpretations
+                  are included as labelled observations. Check them against the original pages before publishing.
                 </>
               )
             ) : (
               <>
-                This draft was written by <b>{outline.model}</b> from {fromBrief ? "your brief" : "the titles and first lines of your material"}.
-                It was validated before saving: formats are checked against the allowed set, and minutes are rescaled
-                so each module adds up. Check the objectives before you publish — the model has not read your material
-                in full.
+                This draft was written by <b>{outline.model}</b> from {fromBrief ? "your brief" : "section sketches and any labelled PDF visual observations"}.
+                Before saving, the structure and activity types are checked, and the times are adjusted to your requested
+                duration. Check the objectives, source accuracy and teaching order before publishing — these require
+                instructor review.
               </>
             )}
           </div>

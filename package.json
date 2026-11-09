@@ -9,12 +9,21 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "typecheck": "tsc --noEmit",
+    "test:studio-input": "node --test tests/studio-input.test.cjs tests/pdf-vision.test.cjs",
+    "test:studio-quality": "node --test tests/outline-quality.test.cjs",
+    "test:quiz": "node --test tests/quiz-answer.test.cjs",
+    "test:ai-audit": "node --test tests/ai-audit.test.cjs",
+    "test:analytics": "node --test tests/analytics-insight.test.cjs",
+    "test:r4-demo": "node --test tests/r4-demo.test.cjs",
+    "demo:r4:seed": "node prisma/seed-r4-demo.mts",
+    "demo:r4:material": "node scripts/create-r4-demo-material.cjs",
     "db:push": "dotenv -e .env.local -- prisma db push",
     "db:seed": "dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts",
     "db:studio": "dotenv -e .env.local -- prisma studio",
     "db:reset": "dotenv -e .env.local -- prisma db push --force-reset && dotenv -e .env.local -- node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.0",
     "@neon/config": "^1.9.3",
     "@neon/env": "^1.6.4",
     "@prisma/client": "^6.2.1",
@@ -32,6 +41,6 @@
     "typescript": "^5.7.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

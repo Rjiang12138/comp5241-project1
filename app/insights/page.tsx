@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { Shell } from "@/components/Shell";
 import { requireStaff } from "@/lib/auth";
-import { courseAnalytics, courseWithMostLearners, listCourses } from "@/lib/store";
+import { courseAnalytics, courseWithMostLearners, listCourses, MIN_INSIGHT_LEARNERS } from "@/lib/store";
 import { dismissInsightAction, nudgeAction, nudgeAllAction, restoreInsightAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -136,6 +136,12 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
         <span className="pill pill-brand">Live query · no cached counters</span>
       </div>
 
+      {course.id === "r4-demo-course" ? (
+        <div className="card card-pad" style={{ marginBottom: "16px" }}>
+          <b>Demo data:</b> This course includes simulated learner activity. The numbers are not observations of real students.
+        </div>
+      ) : null}
+
       <div className="grid-4" style={{ marginBottom: "16px" }}>
         <div className="stat">
           <div className="label">Active this week</div>
@@ -170,7 +176,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
             <div>
               <h3>Weekly engagement</h3>
               <div className="tiny muted" style={{ marginTop: "2px" }}>
-                Share of cohort with at least one event that week
+                Share of cohort with at least one event in each of the last 8 weeks
               </div>
             </div>
             <div className="row tiny muted">
@@ -226,11 +232,13 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
         <div className="card">
           <div className="card-head">
             <h3>Completion by activity type</h3>
-            <span className="tiny muted">{range.days ? `last ${range.days} days` : "all-time"}</span>
+            <span className="tiny muted">all-time progress</span>
           </div>
           <div className="card-body">
             {analytics.byFormat.length === 0 ? (
               <div className="tiny muted">This course has no activities yet.</div>
+            ) : analytics.learners === 0 ? (
+              <div className="tiny muted">No learners are enrolled yet.</div>
             ) : (
               <div className="bars">
                 {analytics.byFormat.map((row) => (
@@ -242,26 +250,36 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
                         style={{ width: `${Math.round((row.pct / maxPct) * 100)}%` }}
                       ></i>
                     </span>
-                    <span className="tiny muted" style={{ textAlign: "right" }}>{row.pct}%</span>
+                    <span className="tiny muted" style={{ textAlign: "right" }}>{row.pct}% ({row.completed}/{row.possible})</span>
                   </div>
                 ))}
               </div>
             )}
 
+            {analytics.learners > 0 && analytics.byFormat.length > 0 ? (
+              <div className="tiny muted" style={{ marginTop: "10px" }}>
+                Counts are completed learner-activity pairs out of all possible pairs for enrolled learners, including those who have not started.
+              </div>
+            ) : null}
             <div className="divider" style={{ margin: "16px 0 14px" }}></div>
 
-            {analytics.byFormat.length >= 2 ? (
+            {analytics.learnersWithCompletions < MIN_INSIGHT_LEARNERS ? (
+              <div className="tiny muted">
+                {analytics.learnersWithCompletions} of {analytics.learners} enrolled learners have completed an activity.
+                A comparison needs at least {MIN_INSIGHT_LEARNERS} learners with completions; this is a display threshold, not a guarantee of statistical significance.
+              </div>
+            ) : analytics.byFormat.length >= 2 && gap > 0 ? (
               <div className="between">
                 <div>
-                  <div style={{ fontSize: "12.6px", fontWeight: "600" }}>{worst.label} finishes lowest</div>
+                  <div style={{ fontSize: "12.6px", fontWeight: "600" }}>{worst.label} has the lowest completion</div>
                   <div className="tiny muted" style={{ marginTop: "2px" }}>
                     {gap} pts below {best.label}
                   </div>
                 </div>
-                <span className={gap >= 10 ? "pill pill-amber" : "pill pill-teal"}>{gap >= 10 ? "Watch" : "Fine"}</span>
+                <span className="pill pill-line">Descriptive only</span>
               </div>
             ) : (
-              <div className="tiny muted">Not enough format variety to compare yet.</div>
+              <div className="tiny muted">No completion gap to compare, or not enough activity types.</div>
             )}
           </div>
         </div>

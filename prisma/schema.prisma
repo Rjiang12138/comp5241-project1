@@ -57,6 +57,7 @@ enum ActivityFormat {
 
 enum AiPurpose {
   outline
+  vision
   activity
   tutor
   insight
@@ -71,10 +72,11 @@ model User {
   locale     String     @default("en")
   createdAt  DateTime   @default(now())
 
-  authoredCourses Course[]     @relation("CourseOwner")
+  authoredCourses Course[]       @relation("CourseOwner")
   enrollments     Enrollment[]
-  taughtCohorts   Cohort[]     @relation("CohortInstructor")
+  taughtCohorts   Cohort[]       @relation("CohortInstructor")
   paths           LearningPath[]
+  aiReviews       AiReview[]
 
   @@index([role])
 }
@@ -109,11 +111,12 @@ model Course {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  owner       User          @relation("CourseOwner", fields: [ownerId], references: [id])
-  cohort      Cohort?       @relation(fields: [cohortId], references: [id])
+  owner       User            @relation("CourseOwner", fields: [ownerId], references: [id])
+  cohort      Cohort?         @relation(fields: [cohortId], references: [id])
   modules     Module[]
   enrollments Enrollment[]
   aiRuns      AiRun[]
+  aiReviews   AiReview[]
   versions    CourseVersion[]
   pathSteps   PathStep[]
 
@@ -164,10 +167,10 @@ model Enrollment {
   importedFrom String   @default("manual")
   createdAt    DateTime @default(now())
 
-  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cohort  Cohort  @relation(fields: [cohortId], references: [id])
-  events  Event[]
+  course Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cohort Cohort  @relation(fields: [cohortId], references: [id])
+  events Event[]
 
   @@unique([courseId, userId])
   @@index([cohortId])
@@ -199,13 +202,13 @@ model CourseVersion {
   snapshot  Json?
   createdAt DateTime @default(now())
 
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course   Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  aiReview AiReview?
 
   @@unique([courseId, version])
 }
 
-/// Every model call is recorded: prompt version, tokens, latency, cost, and
-/// whether an instructor accepted the result.
+/// Studio audit records are attached atomically to the generated course.
 model AiRun {
   id            String    @id @default(cuid())
   purpose       AiPurpose
@@ -213,26 +216,45 @@ model AiRun {
   activityId    String?
   promptVersion String
   model         String
-  tokensIn      Int       @default(0)
-  tokensOut     Int       @default(0)
+  tokensIn      Int?
+  tokensOut     Int?
   latencyMs     Int       @default(0)
-  costUsd       Decimal   @default(0) @db.Decimal(10, 6)
+  costUsd       Decimal?  @db.Decimal(10, 6)
   acceptedBy    String?
+  actorId       String?
+  provider      String?
+  outcome       String    @default("legacy")
+  metadata      Json?
   createdAt     DateTime  @default(now())
 
   course   Course?   @relation(fields: [courseId], references: [id], onDelete: SetNull)
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
 
   @@index([purpose, createdAt])
+  @@index([actorId, createdAt])
+}
+
+/// An explicit staff confirmation attached to one published course version.
+model AiReview {
+  id              String        @id @default(cuid())
+  courseId        String
+  courseVersionId String        @unique
+  reviewerId      String
+  createdAt       DateTime      @default(now())
+  course          Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseVersion   CourseVersion @relation(fields: [courseVersionId], references: [id], onDelete: Cascade)
+  reviewer        User          @relation(fields: [reviewerId], references: [id])
+
+  @@index([courseId, createdAt])
 }
 
 model PromptVersion {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   purpose   AiPurpose
   version   String
   template  String
-  changelog String   @default("")
-  createdAt DateTime @default(now())
+  changelog String    @default("")
+  createdAt DateTime  @default(now())
 
   @@unique([purpose, version])
 }

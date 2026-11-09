@@ -69,7 +69,7 @@ POST /studio (multipart, ≤16 MB)
 Decisions worth defending in a viva:
 
 - **Two generators, one seam.** With a provider key set, `completeJson` asks
-  a model for the module sequence and `coerceModules` validates the reply before
+  a model for the module sequence and `normalizeModelOutline` validates the reply before
   it is saved. Without a key — or when every model in the chain fails — the
   built-in template runs instead. Both paths return the same type, so nothing
   downstream knows or cares which one ran. `GeneratedOutline.template` records it.
@@ -86,10 +86,13 @@ Decisions worth defending in a viva:
 - **The model is given a sketch, not the deck.** Titles plus the first two lines
   under each, capped at 45 headings. Sending the whole text costs tokens and
   makes the model quote bullets instead of designing a sequence.
-- **Validation is where the trust stops.** Formats are checked against the enum,
-  minutes are rescaled so each module's activities add up to its stated length,
-  and an unparseable or out-of-shape reply is rejected outright rather than
-  coerced into rows the editor cannot render.
+- **Validation is where the trust stops.** Model drafts require 3–7 distinct
+  modules, named objectives, supported activities and an interactive activity in
+  each module. Minutes are allocated so every activity totals its module and
+  every module totals the requested course duration. Invalid model replies fall
+  back to a template; both paths are checked again before saving. A short source
+  can yield fewer than three template modules and is labelled accordingly.
+  Instructors still review facts, source alignment and teaching order.
 - **The ceiling is honest.** Free-tier models are rate-limited upstream, which is
   why the chain has two entries and why the template exists at all. Measured on
   the COMP5241 SDLC deck (57 pages): 11–27 s end to end, 5 modules, 9–10

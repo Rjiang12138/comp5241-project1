@@ -42,9 +42,14 @@ npm install
 # one-time: put DATABASE_URL + DATABASE_URL_UNPOOLED in .env.local
 #   (neon init && neon login && neon deploy does it for you)
 npm run db:push      # create the tables
-npm run db:seed      # load the prototype fixture data
+npm run db:seed      # DESTRUCTIVE: replaces existing data; isolated DB only
 npm run dev          # http://localhost:3000
 ```
+
+`db:seed` and `db:reset` remove existing data, including user-created courses
+and dependent records. Do not run them
+against a shared database. For an additive, local-only R4 demonstration and
+its setup steps, see [R4 local demonstration data](docs/r4-demo.md).
 
 Data lives in a Neon Postgres branch. `/` is public; every other route asks who
 you are first and returns you to where you were going. `/login` lists three

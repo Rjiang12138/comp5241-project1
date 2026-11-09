@@ -1,9 +1,9 @@
 /**
  * The model seam.
  *
- * Two providers in a fixed order — ChatAnywhere first, OpenRouter as the spare.
+ * Providers in a fixed order — DeepSeek, ChatAnywhere, then OpenRouter.
  * The order is a preference, not a load balancer: a call only reaches OpenRouter
- * when ChatAnywhere declined (no key, rate limit, bad key, empty reply).
+ * when an earlier provider declined (no key, rate limit, bad key, empty reply).
  *
  * Everything here is server-side and every failure path returns `null` rather
  * than throwing, because a course generator that dies when the network hiccups
@@ -27,18 +27,24 @@
  *
  * ## Configuration
  *
+ *   DEEPSEEK_API_KEY       preferred when configured
+ *   DEEPSEEK_BASE_URL      default https://api.deepseek.com
+ *   DEEPSEEK_MODEL         default deepseek-flash
+ *   DEEPSEEK_VISION_MODEL  default deepseek-flash (native image input)
  *   CHATANYWHERE_API_KEY   primary; without it the chain starts at OpenRouter
  *   CHATANYWHERE_BASE_URL  default https://api.chatanywhere.tech/v1
  *   CHATANYWHERE_MODEL     default gpt-4o-mini
+ *   CHATANYWHERE_VISION_MODEL separate image-input model, default gpt-4o-mini
  *   OPENROUTER_API_KEY     fallback
  *   OPENROUTER_MODEL       optional pin, otherwise the free chain below
+ *   OPENROUTER_VISION_MODEL explicit image-input model; no text-model fallback
  *   LLM_MIN_GAP_MS         minimum gap between calls, default 4000
  *
  * With no key at all, `llmConfigured()` is false and the pipeline stays
  * template-only, which is a supported mode and not an error.
  */
 
-type ProviderId = "chatanywhere" | "openrouter";
+type ProviderId = "deepseek" | "chatanywhere" | "openrouter";
 
 type Provider = {
   id: ProviderId;
@@ -76,10 +82,51 @@ export type LlmCall = {
   provider: ProviderId;
   /** True when the first choice failed and a later one answered. */
   fellBack: boolean;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
 };
 
-function providerChain(): Provider[] {
+export type LlmAttempt = {
+  provider: ProviderId;
+  model: string;
+  latencyMs: number;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  outcome: "response" | "invalid_json" | "unavailable";
+  sent: boolean;
+  httpStatus?: number;
+};
+
+type CompletionOptions = {
+  system: string;
+  user: string;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** An end-to-end deadline, including time waiting in the shared queue. */
+  totalTimeoutMs?: number;
+  maxAttempts?: number;
+  capability?: "vision";
+  images?: readonly { dataUrl: string }[];
+  onAttempt?: (attempt: LlmAttempt) => void;
+};
+
+function providerChain(vision = false): Provider[] {
   const chain: Provider[] = [];
+
+  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepseekKey) {
+    const base = (process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com").replace(/\/+$/, "");
+    chain.push({
+      id: "deepseek",
+      label: "DeepSeek",
+      endpoint: `${base}/chat/completions`,
+      key: deepseekKey,
+      models: [vision
+        ? process.env.DEEPSEEK_VISION_MODEL?.trim() || "deepseek-flash"
+        : process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash"],
+      headers: {},
+    });
+  }
 
   const chatanywhereKey = process.env.CHATANYWHERE_API_KEY?.trim();
   if (chatanywhereKey) {
@@ -89,14 +136,16 @@ function providerChain(): Provider[] {
       label: "ChatAnywhere",
       endpoint: `${base}/chat/completions`,
       key: chatanywhereKey,
-      models: [process.env.CHATANYWHERE_MODEL?.trim() || "gpt-4o-mini"],
+      models: [vision
+        ? process.env.CHATANYWHERE_VISION_MODEL?.trim() || "gpt-4o-mini"
+        : process.env.CHATANYWHERE_MODEL?.trim() || "gpt-4o-mini"],
       headers: {},
     });
   }
 
   const openrouterKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (openrouterKey) {
-    const pinned = process.env.OPENROUTER_MODEL?.trim();
+  const pinned = vision ? process.env.OPENROUTER_VISION_MODEL?.trim() : process.env.OPENROUTER_MODEL?.trim();
+  if (openrouterKey && (!vision || pinned)) {
     chain.push({
       id: "openrouter",
       label: "OpenRouter",
@@ -112,6 +161,10 @@ function providerChain(): Provider[] {
 
 export function llmConfigured(): boolean {
   return providerChain().length > 0;
+}
+
+export function llmVisionConfigured(): boolean {
+  return providerChain(true).length > 0;
 }
 
 /** What to print on the studio screen, e.g. `ChatAnywhere · gpt-4o-mini`. */
@@ -137,10 +190,12 @@ function minGapMs(): number {
 let queue: Promise<unknown> = Promise.resolve();
 let lastCallFinishedAt = 0;
 
-function throttled<T>(task: () => Promise<T>): Promise<T> {
+function throttled<T>(task: () => Promise<T>, deadline?: number): Promise<T | null> {
   const run = queue.then(async () => {
     const wait = minGapMs() - (Date.now() - lastCallFinishedAt);
+    if (deadline !== undefined && Date.now() + Math.max(0, wait) >= deadline) return null;
     if (wait > 0) await sleep(wait);
+    if (deadline !== undefined && Date.now() >= deadline) return null;
     try {
       return await task();
     } finally {
@@ -152,14 +207,19 @@ function throttled<T>(task: () => Promise<T>): Promise<T> {
   // The chain must survive a rejection or every later call queues behind a
   // promise that will never settle.
   queue = run.catch(() => undefined);
-  return run;
+  if (deadline === undefined) return run;
+  // Expired queued work never makes a late request after the caller has returned.
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()));
+    run.then((result) => { clearTimeout(timer); resolve(result); }, (error) => { clearTimeout(timer); reject(error); });
+  });
 }
 
 /* --------------------------------------------------------------- request */
 
 type Attempt =
-  | { ok: true; content: string }
-  | { ok: false; reason: string; status?: number; retryAfterMs?: number; fatal?: boolean };
+  | { ok: true; content: string; tokensIn: number | null; tokensOut: number | null; model: string }
+  | { ok: false; reason: string; status?: number; retryAfterMs?: number; fatal?: boolean; tokensIn?: number | null; tokensOut?: number | null };
 
 /** Pull the first JSON object out of a reply that may be fenced or prefixed. */
 function extractJson(raw: string): unknown {
@@ -183,7 +243,7 @@ function retryAfterMs(response: Response): number | undefined {
 async function post(
   provider: Provider,
   model: string,
-  options: { system: string; user: string; maxTokens?: number },
+  options: CompletionOptions,
   timeoutMs: number,
 ): Promise<Attempt> {
   let response: Response;
@@ -201,8 +261,18 @@ async function post(
         temperature: 0.3,
         messages: [
           { role: "system", content: options.system },
-          { role: "user", content: options.user },
+          {
+            role: "user",
+            content: options.images?.length
+              ? [
+                  { type: "text", text: options.user },
+                  ...options.images.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl, detail: "high" } })),
+                ]
+              : options.user,
+          },
         ],
+        ...(provider.id === "openrouter" && options.images?.length ? { provider: { require_parameters: true } } : {}),
+        ...(provider.id === "deepseek" ? { thinking: { type: "disabled" }, response_format: { type: "json_object" } } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -223,16 +293,19 @@ async function post(
     };
   }
 
-  let payload: { choices?: { message?: { content?: string } }[] };
+  let payload: { choices?: { message?: { content?: string } }[]; model?: unknown; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
   try {
     payload = (await response.json()) as typeof payload;
   } catch {
     return { ok: false, reason: "unreadable body" };
   }
 
-  const content = payload.choices?.[0]?.message?.content ?? "";
-  if (!content.trim()) return { ok: false, reason: "empty content" };
-  return { ok: true, content };
+  const tokenCount = (value: unknown): number | null => typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 2147483647 ? value : null;
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) return { ok: false, reason: "empty content",
+    tokensIn: tokenCount(payload?.usage?.prompt_tokens), tokensOut: tokenCount(payload?.usage?.completion_tokens) };
+  return { ok: true, content, tokensIn: tokenCount(payload.usage?.prompt_tokens), tokensOut: tokenCount(payload.usage?.completion_tokens),
+    model: typeof payload.model === "string" && payload.model.trim() && payload.model.length <= 200 ? payload.model : model };
 }
 
 /**
@@ -242,22 +315,21 @@ async function post(
  * is the common shape of a truncated or reasoning-only reply, and treating it
  * as success would push garbage into the database.
  */
-export async function completeJson(options: {
-  system: string;
-  user: string;
-  maxTokens?: number;
-  timeoutMs?: number;
-}): Promise<LlmCall | null> {
-  const chain = providerChain();
+export async function completeJson(options: CompletionOptions): Promise<LlmCall | null> {
+  const vision = options.capability === "vision" || Boolean(options.images?.length);
+  const chain = providerChain(vision);
   if (chain.length === 0) return null;
 
   // A free tier answers a 30-token prompt in ~13 s, so a 2 000-token outline
   // needs room. Cutting it off at 90 s spent a whole attempt budget on replies
   // that were still arriving.
-  const timeoutMs = options.timeoutMs ?? 120_000;
+  const timeoutMs = options.timeoutMs ?? (vision ? 25_000 : 120_000);
+  const totalTimeoutMs = vision ? Math.min(options.totalTimeoutMs ?? 25_000, 25_000) : options.totalTimeoutMs;
+  if (totalTimeoutMs !== undefined && (!Number.isFinite(totalTimeoutMs) || totalTimeoutMs <= 0)) return null;
+  const deadline = totalTimeoutMs === undefined ? undefined : Date.now() + totalTimeoutMs;
   const plan = chain.flatMap((provider) => provider.models.map((model) => ({ provider, model })));
 
-  let budget = ATTEMPT_BUDGET;
+  let budget = Math.min(ATTEMPT_BUDGET, Math.max(1, Math.floor(options.maxAttempts ?? (vision ? 2 : ATTEMPT_BUDGET))));
 
   for (const [index, step] of plan.entries()) {
     const started = Date.now();
@@ -265,23 +337,47 @@ export async function completeJson(options: {
 
     while (budget > 0) {
       budget -= 1;
-      const attempt = await throttled(() => post(step.provider, step.model, options, timeoutMs));
+      const attemptStarted = Date.now();
+      let sent = false;
+      const attempt = await throttled(() => {
+        const remaining = deadline === undefined ? timeoutMs : Math.min(timeoutMs, deadline - Date.now());
+        if (remaining <= 0) return Promise.resolve<Attempt>({ ok: false, reason: "deadline", fatal: true });
+        sent = true;
+        return post(step.provider, step.model, options, Math.max(1, Math.floor(remaining)));
+      }, deadline);
+      if (!attempt) {
+        options.onAttempt?.({ provider: step.provider.id, model: step.model, latencyMs: Date.now() - attemptStarted,
+          tokensIn: null, tokensOut: null, outcome: "unavailable", sent });
+        return null;
+      }
 
       if (attempt.ok) {
         try {
+          const value = extractJson(attempt.content);
+          options.onAttempt?.({ provider: step.provider.id, model: attempt.model, latencyMs: Date.now() - attemptStarted,
+            tokensIn: attempt.tokensIn, tokensOut: attempt.tokensOut, outcome: "response", sent });
           return {
-            value: extractJson(attempt.content),
-            model: step.model,
+            value,
+            model: attempt.model,
             ms: Date.now() - started,
             provider: step.provider.id,
             fellBack: index > 0,
+            tokensIn: attempt.tokensIn,
+            tokensOut: attempt.tokensOut,
           };
         } catch {
+          options.onAttempt?.({ provider: step.provider.id, model: attempt.model, latencyMs: Date.now() - attemptStarted,
+            tokensIn: attempt.tokensIn, tokensOut: attempt.tokensOut, outcome: "invalid_json", sent });
           break; // Parsed nothing: this model is not going to do better on a retry.
         }
       }
 
+      options.onAttempt?.({ provider: step.provider.id, model: step.model, latencyMs: Date.now() - attemptStarted,
+        tokensIn: attempt.tokensIn ?? null, tokensOut: attempt.tokensOut ?? null, outcome: "unavailable", sent, ...(attempt.status ? { httpStatus: attempt.status } : {}) });
+
       if (attempt.fatal) break; // Bad key — skip this provider's other models too.
+      // Vision has a short submission deadline; try a configured spare first.
+      if (vision && index < plan.length - 1) break;
 
       // A missing status is a network or timeout failure, which is worth one
       // retry for the same reason a 5xx is.
@@ -291,7 +387,9 @@ export async function completeJson(options: {
       retried = true;
       // Respect the server's own number; if it gave none, back off harder than
       // the normal gap because a 429 means we are already too close.
-      await sleep(attempt.retryAfterMs ?? Math.max(minGapMs() * 3, 8_000));
+      const backoff = attempt.retryAfterMs ?? Math.max(minGapMs() * 3, 8_000);
+      if (deadline !== undefined && Date.now() + backoff >= deadline) return null;
+      await sleep(backoff);
     }
   }
 

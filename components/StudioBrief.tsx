@@ -1,6 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  MATERIAL_ACCEPT,
+  MATERIAL_HELP,
+  MAX_BRIEF_CHARS,
+  MAX_TITLE_CHARS,
+  validateMaterials,
+  validateStudioInput,
+} from "@/lib/studio-input";
 
 /**
  * The left column of the studio screen: source material and the brief.
@@ -41,17 +49,51 @@ function extension(name: string): string {
 }
 
 function size(bytes: number): string {
+  if (bytes === 0) return "0 bytes";
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 export default function StudioBrief({ formAction, pending, message, error, defaultTitle, defaultBrief }: Props) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [audience, setAudience] = useState("non_cs");
   const [minutes, setMinutes] = useState("45");
+  const [includeVisuals, setIncludeVisuals] = useState(true);
+  const [visualPageRange, setVisualPageRange] = useState("");
+  const [clientError, setClientError] = useState<string | null>(null);
+  const materialError = validateMaterials(files);
+  const feedback = clientError ?? materialError ?? message;
+  const hasError = Boolean(clientError || materialError || (message && error));
+
+  // React actions reset the native picker after settling, including error returns.
+  // Read it back after that commit so the chips never describe a stale selection.
+  useEffect(() => {
+    if (!pending && fileInput.current) setFiles(Array.from(fileInput.current.files ?? []));
+  }, [pending, message]);
 
   return (
-    <form className="stack" id="studio-form" action={formAction}>
+    <form
+      className="stack"
+      id="studio-form"
+      action={formAction}
+      onReset={() => {
+        setFiles([]);
+        setClientError(null);
+      }}
+      onSubmit={(event) => {
+        const data = new FormData(event.currentTarget);
+        const inputError = validateStudioInput({
+          title: String(data.get("title") ?? "").trim(),
+          brief: String(data.get("brief") ?? "").trim(),
+          files,
+          includeVisuals,
+          visualPageRange,
+        });
+        setClientError(inputError);
+        if (inputError) event.preventDefault();
+      }}
+    >
       <div className="card">
         <div className="card-head">
           <h3>1 · Source material</h3>
@@ -72,7 +114,7 @@ export default function StudioBrief({ formAction, pending, message, error, defau
 
           {files.length === 0 ? (
             <div className="tiny muted" style={{ marginBottom: "8px", lineHeight: 1.5 }}>
-              Add a slide deck, Markdown or text file. Without one, the brief alone is enough to start.
+              Add teaching material, or start from a brief of at least 20 characters.
             </div>
           ) : null}
 
@@ -80,19 +122,74 @@ export default function StudioBrief({ formAction, pending, message, error, defau
             className="btn btn-sm"
             style={{ width: "100%", justifyContent: "center", marginTop: "2px", cursor: "pointer" }}
           >
-            + Add material
+            Choose material
             <input
               type="file"
+              ref={fileInput}
               name="material"
               multiple
-              accept=".pdf,.md,.txt,.csv,application/pdf,text/plain,text/markdown"
+              disabled={pending}
+              accept={MATERIAL_ACCEPT}
+              aria-label="Source material"
+              aria-describedby="studio-material-help studio-input-message"
               style={{ display: "none" }}
               onChange={(event) => {
                 const picked = Array.from(event.target.files ?? []);
-                if (picked.length > 0) setFiles(picked);
+                setFiles(picked);
+                setClientError(null);
               }}
             />
           </label>
+          <div className="tiny muted" id="studio-material-help" style={{ marginTop: "8px", lineHeight: 1.5 }}>
+            {MATERIAL_HELP} Choosing again replaces the selection.
+          </div>
+          <div className="field" style={{ marginTop: "12px", marginBottom: 0 }}>
+            <label style={{ display: "flex", gap: "7px", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                name="includeVisuals"
+                checked={includeVisuals}
+                disabled={pending}
+                onChange={(event) => { setIncludeVisuals(event.target.checked); setClientError(null); }}
+              />
+              Understand PDF diagrams with AI
+            </label>
+            <div className="hint">
+              Sends full selected pages to the configured vision model to read flowcharts, architecture diagrams and scans.
+              One PDF and up to 4 visual pages per generation. Turn off for selectable text only; images are then ignored.
+            </div>
+            {includeVisuals ? (
+              <>
+                <label htmlFor="studio-visual-pages" style={{ marginTop: "8px" }}>Diagram pages (optional)</label>
+                <input
+                  className="input"
+                  id="studio-visual-pages"
+                  name="visualPages"
+                  placeholder="Auto-detect, or e.g. 2,5-7"
+                  value={visualPageRange}
+                  maxLength={100}
+                  disabled={pending}
+                  onChange={(event) => { setVisualPageRange(event.target.value); setClientError(null); }}
+                />
+                <div className="hint">Page numbers refer to the PDF page order. Auto-detection may include logos or decorations.</div>
+              </>
+            ) : null}
+          </div>
+          {files.length > 0 ? (
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={pending}
+              style={{ marginTop: "8px" }}
+              onClick={() => {
+                if (fileInput.current) fileInput.current.value = "";
+                setFiles([]);
+                setClientError(null);
+              }}
+            >
+              Clear files
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -107,6 +204,8 @@ export default function StudioBrief({ formAction, pending, message, error, defau
             <input
               className="input"
               name="title"
+              maxLength={MAX_TITLE_CHARS}
+              onChange={() => setClientError(null)}
               defaultValue={defaultTitle ?? "Software Engineering Foundations"}
             />
           </div>
@@ -116,6 +215,8 @@ export default function StudioBrief({ formAction, pending, message, error, defau
               className="textarea"
               id="brief"
               name="brief"
+              maxLength={MAX_BRIEF_CHARS}
+              onChange={() => setClientError(null)}
               defaultValue={
                 defaultBrief ??
                 "Design a 45-minute sequence for first-year students who have never written code. Cover what software engineering is, how requirements turn into a plan, and how to work with an AI coding agent without losing judgement. Every module needs one hands-on activity."
@@ -163,21 +264,24 @@ export default function StudioBrief({ formAction, pending, message, error, defau
             className="btn btn-primary"
             id="genBtn"
             style={{ width: "100%", justifyContent: "center" }}
-            disabled={pending}
+            disabled={pending || Boolean(materialError)}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
             {pending ? "Generating…" : "Generate outline"}
           </button>
           <div
             className="tiny"
+            id="studio-input-message"
+            role={hasError ? "alert" : "status"}
+            aria-live="polite"
             style={{
               textAlign: "center",
               marginTop: "8px",
-              color: message ? (error ? "#912018" : "var(--muted)") : "var(--muted-2)",
+              color: feedback ? (hasError ? "#912018" : "var(--muted)") : "var(--muted-2)",
               lineHeight: 1.5,
             }}
           >
-            {message ?? "You can edit, reorder or delete anything it produces."}
+            {feedback ?? "You can edit, reorder or delete anything it produces."}
           </div>
         </div>
       </div>

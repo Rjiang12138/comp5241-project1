@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import {
   addActivity,
   addModule,
+  courseAiAudit,
   fillActivityContent,
   importRoster,
   moveModule,
@@ -111,13 +112,20 @@ export async function removeActivityAction(formData: FormData): Promise<void> {
 }
 
 export async function publishCourseAction(formData: FormData): Promise<void> {
-  await requireStaff();
+  const session = await requireStaff();
   const courseId = str(formData, "courseId");
+  const reviewConfirmed = str(formData, "confirmAiReview") === "on";
+  const hasAiRuns = (await courseAiAudit(courseId)).runs.length > 0;
+  if (hasAiRuns && !reviewConfirmed) redirect(`/courses/${courseId}?review=required`);
   // Publishing is the promise that a course is worth a learner's time, so it is
   // also the point where a course with no activity bodies gets them. Filling
   // after publish would ship the generic template to whoever enrolled first.
-  await fillActivityContent(courseId);
-  await publishCourse(courseId);
+  const written = await fillActivityContent(courseId);
+  if (hasAiRuns && written > 0) {
+    refresh(courseId);
+    redirect(`/courses/${courseId}?review=content-added&filled=${written}`);
+  }
+  await publishCourse(courseId, session.userId, reviewConfirmed);
   refresh(courseId);
 }
 

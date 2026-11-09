@@ -750,6 +750,25 @@ function fallback(activity: ActivityLike, module: ModuleLike, course: CourseLike
 }
 
 /** The content for one activity: authored first, generated scaffold second. */
+/** Correct only the exact legacy fallback-quiz shape, without rewriting stored content. */
+function repairLegacyQuiz(payload: ActivityContent, module: ModuleLike): ActivityContent {
+  if (payload.kind !== "quiz" || !Array.isArray(payload.questions) || payload.questions.length !== 1) return payload;
+  const question = payload.questions[0];
+  if (!question || typeof question !== "object" || !Array.isArray(question.options)) return payload;
+  const options = question.options;
+  const none = "None of these — the module makes no claim.";
+  let titleHash = 0;
+  for (let index = 0; index < module.title.length; index += 1) titleHash = (titleHash * 31 + module.title.charCodeAt(index)) % 100000;
+  if (titleHash % 2 !== 1 || !module.objective || question.answer !== 0 ||
+      question.prompt !== `Which of these does “${module.title}” claim?` ||
+      question.explain !== `The module's objective, in the instructor's words: “${module.objective}”` ||
+      options.length < 2 || options.length > 4 || options.some((option) => typeof option !== "string") ||
+      options[1] !== module.objective || options.filter((option) => option === module.objective).length !== 1 ||
+      options.filter((option) => option === none).length !== 1 ||
+      (options.length === 2 ? options[0] !== none : options[options.length - 1] !== none)) return payload;
+  return { ...payload, questions: [{ ...question, answer: 1 }] };
+}
+
 export function contentFor(activity: ActivityLike, module: ModuleLike, course: CourseLike): ActivityContent {
   const authored = AUTHORED[activity.id];
   if (authored) return authored;
@@ -757,7 +776,8 @@ export function contentFor(activity: ActivityLike, module: ModuleLike, course: C
   // A generated course carries its payload; trust it only if it names a kind.
   const payload = activity.payload as { kind?: string } | null | undefined;
   if (payload && typeof payload === "object" && typeof payload.kind === "string") {
-    return payload as unknown as ActivityContent;
+    const content = payload as unknown as ActivityContent;
+    return activity.format === "quiz" ? repairLegacyQuiz(content, module) : content;
   }
 
   return fallback(activity, module, course);

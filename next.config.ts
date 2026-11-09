@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   // the migration (see docs/deployment notes in DEPLOYMENT.md).
   reactStrictMode: true,
   poweredByHeader: false,
+  serverExternalPackages: ["@napi-rs/canvas"],
 
   // Where the build lands. `.next` unless something overrides it.
   //

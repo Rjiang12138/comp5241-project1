@@ -36,6 +36,7 @@ export async function GET(request: Request): Promise<Response> {
   lines.push(["course_id", course.id].join(","));
   lines.push(["range_days", rangeDays ?? "all"].join(","));
   lines.push(["learners", analytics.learners].join(","));
+  lines.push(["learners_with_completions", analytics.learnersWithCompletions].join(","));
   lines.push(["active_this_week_pct", analytics.activeThisWeek].join(","));
   lines.push(["average_progress_pct", analytics.averageProgress].join(","));
   lines.push(["completion_pct", analytics.completionRate].join(","));
@@ -48,8 +49,8 @@ export async function GET(request: Request): Promise<Response> {
   for (const point of analytics.weekly) lines.push([point.label, point.value].join(","));
   lines.push("");
 
-  lines.push(["format", "completion_pct", "attempts"].join(","));
-  for (const row of analytics.byFormat) lines.push([row.label, row.pct, row.attempts].join(","));
+  lines.push(["format", "completion_pct_all_time", "attempts_in_range", "completed_learner_activity_pairs", "possible_learner_activity_pairs"].join(","));
+  for (const row of analytics.byFormat) lines.push([row.label, row.pct, row.attempts, row.completed, row.possible].join(","));
   lines.push("");
 
   lines.push(["learner", "background", "completed", "total", "signal", "last_active"].join(","));

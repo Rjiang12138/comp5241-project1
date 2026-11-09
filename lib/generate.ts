@@ -1,7 +1,13 @@
-import { extractText, getDocumentProxy } from "unpdf";
 import { completeJson, llmConfigured } from "./llm";
 import { authorContent, matchSection } from "./author";
 import type { ActivityContent } from "./activity-content";
+import type { SourceDoc } from "./source";
+import { allocateMinutes, normalizeModelOutline } from "./outline-quality";
+import { OUTLINE_PROMPT, renderPrompt } from "./prompts";
+import { auditAttempt, type AiAuditEntry } from "./ai-audit";
+
+export { readSource, SourceReadError } from "./source";
+export type { SourceDoc } from "./source";
 
 /**
  * Turning an instructor's own material into a draft outline.
@@ -17,8 +23,6 @@ import type { ActivityContent } from "./activity-content";
  * into the `ai_runs` row, so a draft can always be traced back to how it was
  * made. A generator that silently degrades is worse than one that says so.
  */
-
-export type SourceDoc = { name: string; pages: number; text: string };
 
 export type OutlineActivity = {
   title: string;
@@ -44,25 +48,13 @@ export type GenerationStep = { label: string; detail: string; ms: number };
 export type GeneratedOutline = {
   modules: OutlineModule[];
   steps: GenerationStep[];
-  sources: { name: string; pages: number; chars: number }[];
+  auditRuns: AiAuditEntry[];
+  sources: { name: string; pages: number; chars: number; visualPages?: number[]; visualModel?: string }[];
   /** True when the outline came from the template rather than a language model. */
   template: boolean;
   /** The model that produced it, or "template-v1". Persisted on the ai_runs row. */
   model: string;
 };
-
-/** Read one uploaded file. PDFs go through pdf.js; anything else is read as text. */
-export async function readSource(file: File): Promise<SourceDoc> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-
-  if (/\.pdf$/i.test(file.name)) {
-    const pdf = await getDocumentProxy(bytes);
-    const { totalPages, text } = await extractText(pdf, { mergePages: true });
-    return { name: file.name, pages: totalPages, text };
-  }
-
-  return { name: file.name, pages: 1, text: new TextDecoder("utf-8").decode(bytes) };
-}
 
 type Heading = { title: string; body: string[] };
 
@@ -89,6 +81,7 @@ function cleanBody(line: string): string {
  * which pdf.js does not give us.
  */
 function toHeadings(text: string): Heading[] {
+  const hasMarkdownHeadings = /^\s*#{1,6}\s+\S/m.test(text);
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, " ").trim())
@@ -98,6 +91,12 @@ function toHeadings(text: string): Heading[] {
   let current: Heading | null = null;
 
   for (const line of lines) {
+    const markdownHeading = /^#{1,6}\s+(.+)$/.exec(line);
+    if (markdownHeading) {
+      current = { title: markdownHeading[1].replace(/\s+#+\s*$/, ""), body: [] };
+      headings.push(current);
+      continue;
+    }
     if (/^\d{1,3}$/.test(line)) continue; // page number
     if (/^https?:\/\//i.test(line)) continue;
     if (/^references?:?$/i.test(line)) {
@@ -117,7 +116,7 @@ function toHeadings(text: string): Heading[] {
     const endsSentence = /[.!?:;]$/.test(bare);
     const startsUpper = /^[A-Z0-9(“"]/.test(bare);
 
-    if (!bullet && words >= 2 && words <= 9 && !endsSentence && startsUpper) {
+    if (!hasMarkdownHeadings && !bullet && words >= 2 && words <= 9 && !endsSentence && startsUpper) {
       current = { title: bare, body: [] };
       headings.push(current);
     } else if (current) {
@@ -127,6 +126,16 @@ function toHeadings(text: string): Heading[] {
   }
 
   return headings.filter((heading) => heading.body.length > 0);
+}
+
+function sourceHeadings(source: SourceDoc): Heading[] {
+  const visualHeadings = source.visual ? toHeadings(source.visual.text) : [];
+  // CSV rows are teaching material, not slide titles or an enrolment roster.
+  const headings = /\.csv$/i.test(source.name) ? [] : toHeadings(source.text);
+  if (headings.length > 0) return [...visualHeadings, ...headings];
+
+  const body = source.text.split(/\r\n?|\n/).map((line) => line.trim()).filter(Boolean);
+  return [...visualHeadings, ...(body.length > 0 ? [{ title: trim(body[0], 70), body }] : [])];
 }
 
 /**
@@ -140,14 +149,14 @@ function toHeadings(text: string): Heading[] {
  * sentences and the strongest ones become the section seeds, so both the model
  * path and the template path have something to work with.
  */
-function briefHeadings(brief: string, title: string): Heading[] {
+function briefHeadings(brief: string): Heading[] {
   const sentences = brief
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?])\s+|(?<=[。！？])|\n+/)
     .map((sentence) => sentence.replace(/^[-•*]\s*/, "").replace(/\s+/g, " ").trim())
-    .filter((sentence) => sentence.split(" ").length >= 3);
+    .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence));
 
   return sentences.slice(0, 5).map((sentence) => ({
-    title: trim(sentence.replace(/[.!?]+$/, ""), 70),
+    title: trim(sentence.replace(/[.!?。！？]+$/, ""), 70),
     body: [sentence],
   }));
 }
@@ -182,29 +191,35 @@ function draftFromHeadings(
   options: { minutes: number; audience: "non_cs" | "cs" | "mixed"; title: string },
 ): OutlineModule[] {
   const target = Math.min(7, Math.max(3, Math.round(options.minutes / 9)));
-  const count = Math.min(target, headings.length);
-  const stride = Math.max(1, Math.floor(headings.length / count));
+  // Repeated slide headings should not produce indistinguishable modules.
+  const seen = new Set<string>();
+  const distinct = headings.filter((heading) => {
+    const key = trim(heading.title, 70).toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const count = Math.min(target, distinct.length, Math.floor(options.minutes / 4));
+  if (count === 0) return [];
+  const stride = Math.max(1, Math.floor(distinct.length / count));
 
   const picked: Heading[] = [];
   for (let index = 0; index < count; index += 1) {
-    const heading = headings[index * stride];
+    const heading = distinct[index * stride];
     if (heading && !picked.includes(heading)) picked.push(heading);
   }
   // A short deck can leave us under the target; fill from the front.
-  for (const heading of headings) {
+  for (const heading of distinct) {
     if (picked.length >= count) break;
     if (!picked.includes(heading)) picked.push(heading);
   }
 
-  const perModule = Math.max(6, Math.floor(options.minutes / Math.max(1, picked.length)));
-  let remaining = options.minutes;
+  const moduleMinutes = allocateMinutes(options.minutes, picked.map(() => 1), picked.map(() => 4));
+  if (!moduleMinutes) return [];
 
   return picked.map((heading, index) => {
-    const minutes = index === picked.length - 1 ? Math.max(5, remaining) : perModule;
-    remaining -= minutes;
-
-    const readingMinutes = Math.max(3, Math.round(minutes * 0.4));
-    const handsOnMinutes = Math.max(3, minutes - readingMinutes);
+    const minutes = moduleMinutes[index];
+    const [readingMinutes, handsOnMinutes] = allocateMinutes(minutes, [0.4, 0.6], [2, 2])!;
 
     return {
       title: trim(heading.title, 70),
@@ -265,113 +280,15 @@ function sketch(headings: Heading[], limit = 45): string {
     .join("\n");
 }
 
-const SYSTEM_PROMPT =
-  "You are an instructional designer building a short university mini-course from lecture material. " +
-  "You reply with a single JSON object and nothing else — no prose, no markdown fences.";
-
 function userPrompt(
   headings: Heading[],
-  options: { minutes: number; audience: "non_cs" | "cs" | "mixed"; title: string; brief: string },
+  options: { minutes: number; audience: "non_cs" | "cs" | "mixed"; title: string; brief: string; visualText?: string },
 ): string {
-  return `Course title: ${options.title || "Untitled course"}
-Audience: ${AUDIENCE_TEXT[options.audience]}
-Time budget: ${options.minutes} minutes in total
-Instructor brief: ${options.brief || "(none given — infer the outcome from the material)"}
-
-Lecture material (titles and first lines, in slide order):
-${sketch(headings)}
-
-Return exactly this JSON shape:
-{"modules":[{"title":"...","objective":"one sentence starting with a verb","minutes":10,"activities":[{"title":"...","format":"reading","minutes":5},{"title":"...","format":"simulation","minutes":5}]}]}
-
-Rules:
-- 3 to 7 modules. "minutes" across all modules must add up to about ${options.minutes}.
-- Each module has 1 to 3 activities. Every module must include at least one activity whose format is not "reading".
-- "format" must be one of: reading, simulation, code_lab, role_play, quiz.
-- Module titles must be grounded in the lecture material above. Do not invent topics that are not there.
-- No text outside the JSON object.`;
-}
-
-const FORMATS: OutlineActivity["format"][] = ["reading", "simulation", "code_lab", "role_play", "quiz"];
-
-function asText(value: unknown, max: number): string {
-  return typeof value === "string" ? trim(value.replace(/\s+/g, " ").trim(), max) : "";
-}
-
-function asMinutes(value: unknown, fallback: number): number {
-  const number = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(120, Math.max(2, Math.round(number)));
-}
-
-/**
- * Force a model reply into the shape the database expects, or reject it.
- *
- * The reply is untrusted input: a model that returns two modules with no
- * activities, or invents a format called "video", has to be caught here rather
- * than produce rows the editor cannot render. Rejecting means falling back to
- * the template, which is the whole point of having one.
- */
-function coerceModules(value: unknown, options: { minutes: number }): OutlineModule[] | null {
-  const raw = (value as { modules?: unknown })?.modules;
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) return null;
-
-  const modules: OutlineModule[] = [];
-
-  for (const entry of raw) {
-    const source = entry as Record<string, unknown>;
-    const title = asText(source.title, 90);
-    if (!title) return null;
-
-    const objective = asText(source.objective, 180) || `Cover ${title}`;
-    const estimatedMinutes = asMinutes(source.minutes, Math.max(6, Math.round(options.minutes / raw.length)));
-
-    const rawActivities = Array.isArray(source.activities) ? source.activities.slice(0, 4) : [];
-    const activities: OutlineActivity[] = [];
-
-    for (const rawActivity of rawActivities) {
-      const activity = rawActivity as Record<string, unknown>;
-      const format = FORMATS.includes(activity.format as OutlineActivity["format"])
-        ? (activity.format as OutlineActivity["format"])
-        : "reading";
-      const activityTitle = asText(activity.title, 90) || `${format.replace("_", " ")}: ${title}`;
-      activities.push({
-        title: activityTitle,
-        format,
-        minutes: asMinutes(activity.minutes, Math.max(3, Math.round(estimatedMinutes / 2))),
-      });
-    }
-
-    if (activities.length === 0) {
-      activities.push({ title: `Read: ${trim(title, 50)}`, format: "reading", minutes: estimatedMinutes });
-    }
-
-    modules.push({ title, objective, estimatedMinutes, activities: scaleActivities(activities, estimatedMinutes) });
-  }
-
-  return modules.length > 0 ? modules : null;
-}
-
-/**
- * Make the activity minutes add up to the module's stated length.
- *
- * Without this the studio shows "10 min" on a module whose activities sum to 8,
- * and the pedagogy check and the learner path disagree about how long the
- * course is. The last activity absorbs the rounding.
- */
-function scaleActivities(activities: OutlineActivity[], target: number): OutlineActivity[] {
-  const total = activities.reduce((sum, activity) => sum + activity.minutes, 0);
-  if (total === target || activities.length === 0) return activities;
-
-  const scaled = activities.map((activity) => ({
-    ...activity,
-    minutes: Math.max(2, Math.round((activity.minutes / total) * target)),
-  }));
-
-  const drift = target - scaled.reduce((sum, activity) => sum + activity.minutes, 0);
-  const last = scaled[scaled.length - 1];
-  scaled[scaled.length - 1] = { ...last, minutes: Math.max(2, last.minutes + drift) };
-  return scaled;
+  return renderPrompt(OUTLINE_PROMPT.userTemplate, {
+    title: options.title || "Untitled course", audience: AUDIENCE_TEXT[options.audience], minutes: String(options.minutes),
+    brief: options.brief || "(none given — infer the outcome from the material)", sketch: sketch(headings),
+    visualText: options.visualText || "(none)",
+  });
 }
 
 /**
@@ -393,6 +310,18 @@ export async function generateOutline(
   },
 ): Promise<GeneratedOutline> {
   const steps: GenerationStep[] = [];
+  const auditRuns: AiAuditEntry[] = files.flatMap((file) => file.visual
+    ? file.visual.auditRuns ?? [{ purpose: "vision", promptVersion: "legacy-unknown", model: file.visual.model,
+      provider: file.visual.provider, outcome: "used", tokensIn: null, tokensOut: null, latencyMs: file.visual.ms,
+      metadata: { fileName: file.name, pages: file.visual.pages } }]
+    : []);
+  for (const file of files) {
+    if (file.visual) steps.push({
+      label: `Read PDF diagrams: ${file.name}`,
+      detail: `pages ${file.visual.pages.join(", ")} · ${file.visual.provider} · ${file.visual.model} · AI interpretation, teacher review required`,
+      ms: file.visual.ms,
+    });
+  }
 
   let started = Date.now();
   const combined = files.map((file) => file.text).join("\n");
@@ -406,16 +335,17 @@ export async function generateOutline(
   });
 
   started = Date.now();
-  const headings = toHeadings(combined);
+  const headings = files.flatMap(sourceHeadings);
   const brief = (options.brief ?? "").trim();
-  // No deck, but a brief: seed the outline from the brief's own sentences.
-  const seeds = headings.length >= 3 ? headings : brief ? briefHeadings(brief, options.title) : headings;
+  // A short or unheaded upload must not be replaced by the accompanying brief.
+  const fromBrief = files.length === 0;
+  const seeds = fromBrief ? briefHeadings(brief) : headings;
   steps.push({
     label: "Find section boundaries",
     detail:
-      headings.length >= 3
-        ? `${headings.length} headings · ${combined.length.toLocaleString("en-GB")} characters`
-        : `${seeds.length} sections · drawn from the brief · ${brief.length.toLocaleString("en-GB")} characters`,
+      fromBrief
+        ? `${seeds.length} sections · drawn from the brief · ${brief.length.toLocaleString("en-GB")} characters`
+        : `${seeds.length} sections · drawn from uploaded material · ${combined.length.toLocaleString("en-GB")} characters`,
     ms: Date.now() - started,
   });
 
@@ -428,20 +358,32 @@ export async function generateOutline(
   // into a course invents more than it reads. A brief is different — it is
   // written as an instruction, and designing the sequence is the job being asked
   // for — so one sentence is enough to call the model.
-  const fromBrief = headings.length < 3 && brief.length > 0;
-
-  if (wantsModel && (fromBrief || seeds.length >= 3)) {
+  if (wantsModel && (fromBrief || seeds.length >= 3 || files.some((file) => file.visual))) {
+    const attempts: AiAuditEntry[] = [];
     const call = await completeJson({
-      system: SYSTEM_PROMPT,
+      system: OUTLINE_PROMPT.system,
+      onAttempt: (attempt) => attempts.push(auditAttempt("outline", OUTLINE_PROMPT.version, attempt)),
+      ...(files.some((file) => file.visual) ? { totalTimeoutMs: 20_000 } : {}),
       user: userPrompt(seeds, {
         minutes: options.minutes,
         audience: options.audience,
         title: options.title,
         brief,
+        visualText: files.filter((file) => file.visual).map((file) => `${file.name}\n${file.visual!.text}`).join("\n\n"),
       }),
     });
 
-    const coerced = call ? coerceModules(call.value, { minutes: options.minutes }) : null;
+    const checked = call ? normalizeModelOutline(call.value, options.minutes, files.some((file) => !!file.visual)) : null;
+    const coerced = checked?.modules ?? null;
+    if (call && !attempts.some((attempt) => attempt.outcome === "used")) {
+      attempts.push({ purpose: "outline", promptVersion: OUTLINE_PROMPT.version, model: call.model, provider: call.provider,
+        outcome: "used", tokensIn: call.tokensIn ?? null, tokensOut: call.tokensOut ?? null, latencyMs: call.ms });
+    }
+    if (call && !coerced) {
+      const reply = attempts.findLast((attempt) => attempt.outcome === "used");
+      if (reply) { reply.outcome = "rejected"; reply.metadata = { ...reply.metadata, reason: checked?.reason ?? "invalid_outline" }; }
+    }
+    auditRuns.push(...attempts);
 
     if (call && coerced) {
       modules = coerced;
@@ -459,8 +401,10 @@ export async function generateOutline(
     } else {
       steps.push({
         label: "Call language model",
-        detail: "no usable reply — fell back to the built-in template",
-        ms: 0,
+        detail: checked?.reason
+          ? `model draft rejected: ${checked.reason} — fell back to the built-in template`
+          : "model unavailable — fell back to the built-in template",
+        ms: call?.ms ?? 0,
       });
     }
   }
@@ -468,9 +412,11 @@ export async function generateOutline(
   if (modules.length === 0) {
     started = Date.now();
     modules = draftFromHeadings(seeds, options);
+    if (modules.length) auditRuns.push({ purpose: "outline", promptVersion: "template-v1", model: "template-v1", provider: null,
+      outcome: "template", tokensIn: null, tokensOut: null, latencyMs: Date.now() - started });
     steps.push({
       label: "Draft module sequence",
-      detail: `${modules.length} modules · ${options.minutes} min projected · template`,
+      detail: `${modules.length} modules · ${options.minutes} min projected · template${modules.length > 0 && modules.length < 3 ? " · limited source sections; add material for more modules" : ""}`,
       ms: Date.now() - started,
     });
   }
@@ -503,7 +449,9 @@ export async function generateOutline(
   const usedSections = new Set<number>();
   const objectives = modules.map((module) => module.objective);
   modules = modules.map((module) => {
-    const index = matchSection(module.title, seeds, usedSections);
+    // Template titles are exact, including languages the English token matcher cannot score.
+    const exact = seeds.findIndex((seed, index) => !usedSections.has(index) && trim(seed.title, 70) === module.title);
+    const index = exact >= 0 ? exact : matchSection(module.title, seeds, usedSections);
     if (index !== null) usedSections.add(index);
     const section = index !== null ? { title: seeds[index].title, body: seeds[index].body } : null;
 
@@ -525,26 +473,44 @@ export async function generateOutline(
   });
   steps.push({
     label: "Write activity bodies",
-    detail: `${activityCount} activities · ${usedSections.size} sections quoted · ${fromBrief ? "brief as source" : "deck as source"}`,
+    detail: `${activityCount} activities · ${usedSections.size} sections quoted · ${fromBrief ? "brief as source" : "uploaded material as source"}`,
     ms: Date.now() - started,
   });
 
+  // Title matching cannot reliably associate a rewritten model title with
+  // "PDF page N". Preserve the full, attributed diagram evidence once in the
+  // first reading rather than silently dropping it or presenting it as a quote.
+  const visualEvidence = files.filter((file) => file.visual);
+  const firstReading = modules.flatMap((module) => module.activities).find((activity) => activity.payload?.kind === "reading");
+  if (firstReading?.payload?.kind === "reading" && visualEvidence.length > 0) {
+    firstReading.payload.blocks.push(...visualEvidence.map((file) => ({
+      heading: `${file.name} · PDF pages ${file.visual!.pages.join(", ")} · AI visual interpretation — verify against the source`,
+      text: file.visual!.text,
+    })));
+  }
+
   steps.push({
-    label: "Check prerequisite order",
+    label: "Review source order",
     detail: template
       ? fromBrief
         ? "modules follow the order you described in the brief"
         : "modules follow the order of the source material"
       : fromBrief
-        ? "modules reviewed against the order you described"
-        : "modules reviewed against the source order",
+        ? "model-proposed order; instructor review required"
+        : "model-proposed order; check against source material",
     ms: 0,
   });
 
   return {
     modules,
     steps,
-    sources: files.map((file) => ({ name: file.name, pages: file.pages, chars: file.text.length })),
+    auditRuns,
+    sources: files.map((file) => ({
+      name: file.name,
+      pages: file.pages,
+      chars: file.text.length + (file.visual?.text.length ?? 0),
+      ...(file.visual ? { visualPages: file.visual.pages, visualModel: file.visual.model } : {}),
+    })),
     template,
     model,
   };

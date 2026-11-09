@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import type { GeneratedOutline } from "./generate";
 import { authorContent } from "./author";
 import { hasAuthoredContent } from "./activity-content";
+import { PROMPTS } from "./prompts";
+import type { AiAuditEntry } from "./ai-audit";
 import type {
   Activity,
   ActivityFormat,
@@ -317,8 +319,10 @@ export async function fillActivityContent(courseId: string): Promise<number> {
   return written;
 }
 
-export async function publishCourse(courseId: string): Promise<void> {
+export async function publishCourse(courseId: string, reviewerId: string, reviewConfirmed: boolean): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    const hasAiRuns = (await tx.aiRun.count({ where: { courseId } })) > 0;
+    if (hasAiRuns && !reviewConfirmed) throw new Error("Review the generated course before publishing.");
     const current = await tx.course.findUnique({
       where: { id: courseId },
       select: {
@@ -331,9 +335,10 @@ export async function publishCourse(courseId: string): Promise<void> {
           select: {
             title: true,
             objective: true,
+            estimatedMinutes: true,
             activities: {
               orderBy: { position: "asc" },
-              select: { title: true, format: true, minutes: true },
+              select: { title: true, format: true, minutes: true, payload: true, rubric: true },
             },
           },
         },
@@ -346,7 +351,7 @@ export async function publishCourse(courseId: string): Promise<void> {
       select: { version: true },
     });
 
-    await tx.courseVersion.create({
+    const version = await tx.courseVersion.create({
       data: {
         courseId,
         version: course.version,
@@ -356,8 +361,65 @@ export async function publishCourse(courseId: string): Promise<void> {
         // change, which is a note, not a diff.
         snapshot: current ? (current as unknown as Prisma.InputJsonValue) : undefined,
       },
+      select: { id: true },
     });
+    if (hasAiRuns) await tx.aiReview.create({ data: { courseId, courseVersionId: version.id, reviewerId } });
   }, { timeout: 15_000 });
+}
+
+/** Records for the staff course editor; legacy acceptance fields are not evidence of review. */
+export async function courseAiAudit(courseId: string) {
+  const [runs, reviews] = await Promise.all([
+    prisma.aiRun.findMany({ where: { courseId }, orderBy: { createdAt: "asc" } }),
+    prisma.aiReview.findMany({ where: { courseId }, orderBy: { createdAt: "desc" },
+      include: { reviewer: { select: { name: true } }, courseVersion: { select: { version: true } } } }),
+  ]);
+  const sequence = (metadata: Prisma.JsonValue | null): number => {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return Number.MAX_SAFE_INTEGER;
+    return typeof metadata.sequence === "number" ? metadata.sequence : Number.MAX_SAFE_INTEGER;
+  };
+  runs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || sequence(a.metadata) - sequence(b.metadata));
+  return { runs, reviews };
+}
+
+async function registerAuditPrompts(tx: Prisma.TransactionClient, runs: AiAuditEntry[]): Promise<void> {
+  const versions = new Set(runs.map((run) => run.promptVersion));
+  for (const prompt of PROMPTS.filter((item) => versions.has(item.version))) {
+    const stored = await tx.promptVersion.upsert({
+      where: { purpose_version: { purpose: prompt.purpose, version: prompt.version } },
+      create: { purpose: prompt.purpose, version: prompt.version, template: prompt.template,
+        changelog: "Content fingerprint of the fixed system and user prompt templates." },
+      update: {},
+      select: { template: true },
+    });
+    if (stored.template !== prompt.template) throw new Error("The stored prompt template does not match its version fingerprint.");
+  }
+}
+
+function auditData(run: AiAuditEntry, actorId: string) {
+  return { purpose: run.purpose, promptVersion: run.promptVersion, model: run.model, provider: run.provider,
+    outcome: run.outcome, tokensIn: run.tokensIn, tokensOut: run.tokensOut, latencyMs: run.latencyMs,
+    costUsd: null, acceptedBy: null, actorId,
+    metadata: run.metadata ? (run.metadata as Prisma.InputJsonValue) : undefined };
+}
+
+/** Keep paid attempts visible even when material processing cannot save a course. */
+export async function recordUnattachedAiRuns(actorId: string, runs: AiAuditEntry[]): Promise<void> {
+  if (!runs.length) return;
+  await prisma.$transaction(async (tx) => {
+    await registerAuditPrompts(tx, runs);
+    await tx.aiRun.createMany({ data: runs.map((run, sequence) => ({
+      ...auditData({ ...run, metadata: { ...run.metadata, sequence } }, actorId), courseId: null,
+    })) });
+  }, { timeout: 15_000 });
+}
+
+/** Only the signed-in staff member's attempts that did not produce a course. */
+export async function recentUnattachedAiRuns(actorId: string) {
+  const rows = await prisma.aiRun.findMany({ where: { actorId, courseId: null }, orderBy: { createdAt: "desc" }, take: 12,
+    select: { id: true, purpose: true, model: true, provider: true, outcome: true, tokensIn: true, tokensOut: true,
+      latencyMs: true, promptVersion: true, metadata: true, createdAt: true } });
+  return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }));
 }
 
 export async function createCohort(input: {
@@ -398,16 +460,12 @@ export async function createCourseFromOutline(input: {
   model: string;
   outline: GeneratedOutline;
 }): Promise<string> {
-  // One nested write, not a loop inside an interactive transaction.
-  //
-  // The first version created the course, then each module, then each activity,
-  // then the AiRun — seventeen sequential round trips to a database in another
-  // region. Prisma's interactive transactions default to a five-second budget,
-  // and the tree took longer than that to write, so "Generate outline" answered
-  // 500 with P2028 while the draft was half-inserted. A nested create sends the
-  // same graph in one call: it is atomic without holding a transaction open
-  // across a dozen network hops.
-  const course = await prisma.course.create({
+  // Register only the prompt templates used, then persist the course tree and
+  // its audit runs in one nested write. The outer transaction keeps the prompt
+  // registry and course together without one database trip per activity.
+  const course = await prisma.$transaction(async (tx) => {
+    await registerAuditPrompts(tx, input.outline.auditRuns);
+    return tx.course.create({
     data: {
       title: input.title.trim() || "Untitled course",
       brief: input.brief,
@@ -436,19 +494,12 @@ export async function createCourseFromOutline(input: {
         })),
       },
       aiRuns: {
-        create: {
-          purpose: "outline",
-          // Which prompt produced this draft, so a later audit can tell a model
-          // draft from a template one without reading the course itself.
-          promptVersion: input.outline.template ? "template-v1" : "outline-json-v1",
-          model: input.model,
-          latencyMs: input.outline.steps.reduce((sum, step) => sum + step.ms, 0),
-          acceptedBy: input.ownerId,
-        },
+        create: input.outline.auditRuns.map((run, sequence) => auditData({ ...run, metadata: { ...run.metadata, sequence } }, input.ownerId)),
       },
     },
     select: { id: true },
-  });
+    });
+  }, { timeout: 15_000 });
 
   return course.id;
 }
@@ -796,7 +847,7 @@ export async function listPublishedCourses(): Promise<Array<{ id: string; title:
 
 export type WeeklyPoint = { label: string; value: number };
 
-export type FormatCompletion = { format: ActivityFormat; label: string; pct: number; attempts: number };
+export type FormatCompletion = { format: ActivityFormat; label: string; pct: number; attempts: number; completed: number; possible: number };
 
 export type NudgeRow = {
   userId: string;
@@ -811,6 +862,7 @@ export type NudgeRow = {
 
 export type CourseAnalytics = {
   learners: number;
+  learnersWithCompletions: number;
   activeThisWeek: number;
   /** Share of the cohort who finished every activity. */
   completionRate: number;
@@ -828,6 +880,7 @@ export type CourseAnalytics = {
 };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+export const MIN_INSIGHT_LEARNERS = 5;
 
 function median(values: number[]): number {
   if (values.length === 0) return 0;
@@ -906,6 +959,10 @@ export async function courseAnalytics(courseId: string, rangeDays: number | null
   }
 
   const total = activities.length;
+  const activityIds = new Set(activities.map((activity) => activity.id));
+  const learnersWithCompletions = enrolments.filter((enrolment) =>
+    [...(completedByEnrolment.get(enrolment.id) ?? [])].some((id) => activityIds.has(id)),
+  ).length;
   const finished = [...completedByEnrolment.values()].filter((set) => set.size >= total && total > 0).length;
   const progressSum = enrolments.reduce(
     (sum, enrolment) => sum + Math.min(total, completedByEnrolment.get(enrolment.id)?.size ?? 0),
@@ -921,7 +978,7 @@ export async function courseAnalytics(courseId: string, rangeDays: number | null
     const end = now - index * WEEK_MS;
     const start = end - WEEK_MS;
     const active = new Set(
-      events
+      allEvents
         .filter((event) => {
           const time = event.createdAt.getTime();
           return time > start && time <= end;
@@ -964,6 +1021,8 @@ export async function courseAnalytics(courseId: string, rangeDays: number | null
       label,
       pct: possible === 0 ? 0 : Math.round((done / possible) * 100),
       attempts,
+      completed: done,
+      possible,
     });
   }
   byFormat.sort((a, b) => b.pct - a.pct);
@@ -1006,36 +1065,24 @@ export async function courseAnalytics(courseId: string, rangeDays: number | null
     .sort((a, b) => a.completed - b.completed || (a.lastActive?.getTime() ?? 0) - (b.lastActive?.getTime() ?? 0))
     .slice(0, 5);
 
-  // One insight, stated only when the numbers support it — and attributed to
-  // the right cause. A format that only appears in the final module will always
-  // look weak; that is position, not difficulty, and saying "quizzes are hard"
-  // would be a confident wrong answer.
+  // A format comparison describes completion, not why learners did or did not
+  // finish. Five learners is a display threshold, not statistical significance.
   const weakest = byFormat.length > 0 ? byFormat[byFormat.length - 1] : null;
   const strongest = byFormat.length > 0 ? byFormat[0] : null;
-  const moduleCount = Math.max(1, ...activities.map((activity) => activity.module.position));
   const weakestRows = weakest ? activities.filter((activity) => activity.format === weakest.format) : [];
-  const weakestPosition = weakestRows.length
-    ? weakestRows.reduce((sum, activity) => sum + activity.module.position, 0) / weakestRows.length
-    : 0;
-  const lateInCourse = weakestRows.length > 0 && weakestPosition > moduleCount - 1.5;
 
   const insight =
-    weakest && strongest && strongest.pct - weakest.pct >= 10
-      ? lateInCourse
-        ? {
-            headline: `Learners stop before module ${Math.round(weakestPosition)}`,
-            body: `${weakest.label} activities finish ${weakest.pct}% of the time, ${strongest.pct - weakest.pct} points below ${strongest.label} — but every ${weakest.label.toLowerCase()} in this course sits in module ${Math.round(weakestPosition)} of ${moduleCount}. The drop is attrition, not difficulty. The change worth making is at the end of the previous module: a checkpoint that tells a learner what they are about to unlock, rather than another attempt at the last activity.`,
-            activityTitle: weakestRows[0]?.title ?? null,
-          }
-        : {
-            headline: `${weakest.label} finishes ${strongest.pct - weakest.pct} points below ${strongest.label}`,
-            body: `Learners complete ${strongest.label.toLowerCase()} activities ${strongest.pct}% of the time and ${weakest.label.toLowerCase()} activities ${weakest.pct}% of the time, and the two are spread across the same modules — so this is the format, not the position. Consider a worked example before the first ${weakest.label.toLowerCase()}, and move the first hint from on-request to after one failure.`,
-            activityTitle: weakestRows[0]?.title ?? null,
-          }
+    learnersWithCompletions >= MIN_INSIGHT_LEARNERS && weakest && strongest && byFormat.length >= 2 && strongest.pct - weakest.pct >= 10
+      ? {
+          headline: `${weakest.label} completion is ${strongest.pct - weakest.pct} points below ${strongest.label}`,
+          body: `${weakest.label}: ${weakest.completed} of ${weakest.possible} learner-activity pairs completed (${weakest.pct}%); ${strongest.label}: ${strongest.completed} of ${strongest.possible} (${strongest.pct}%). These are all-time completion counts for ${enrolments.length} enrolled learners; ${learnersWithCompletions} have completed at least one activity. The comparison does not establish a cause. Review activity order and learner feedback before deciding what to change.`,
+          activityTitle: weakestRows[0]?.title ?? null,
+        }
       : null;
 
   return {
     learners: enrolments.length,
+    learnersWithCompletions,
     activeThisWeek: weekly[weekly.length - 1]?.value ?? 0,
     completionRate: enrolments.length === 0 ? 0 : Math.round((finished / enrolments.length) * 100),
     averageProgress,
@@ -1282,7 +1329,7 @@ export async function listSignableUsers(): Promise<User[]> {
     orderBy: [{ role: "asc" }, { name: "asc" }],
   });
   const learners = await prisma.user.findMany({
-    where: { id: { in: ["u-mei", "u-arjun", "u-sara"] } },
+    where: { id: { in: ["u-mei", "u-arjun", "u-sara", "r4-demo-learner-1"] } },
     orderBy: { name: "asc" },
   });
   return [...staff, ...learners];

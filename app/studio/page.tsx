@@ -2,7 +2,7 @@ import { Shell } from "@/components/Shell";
 import StudioWorkspace from "@/components/StudioWorkspace";
 import { requireStaff } from "@/lib/auth";
 import { llmConfigured, llmProviderLabel } from "@/lib/llm";
-import { lastTouchedCourse, listCourses } from "@/lib/store";
+import { lastTouchedCourse, listCourses, recentUnattachedAiRuns } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Studio — Praxis" };
@@ -34,7 +34,9 @@ function ago(date: Date): string {
  */
 export default async function StudioPage() {
   const session = await requireStaff("/studio");
-  const [last, courses] = await Promise.all([lastTouchedCourse(session.userId), listCourses()]);
+  const [last, courses, recentAttempts] = await Promise.all([
+    lastTouchedCourse(session.userId), listCourses(), recentUnattachedAiRuns(session.userId),
+  ]);
 
   // Printed in the page head so the screen never claims to be model-backed when
   // no key is configured — the same honesty the generation log enforces. When a
@@ -88,7 +90,7 @@ export default async function StudioPage() {
         </div>
       </div>
 
-      <StudioWorkspace />
+      <StudioWorkspace recentAttempts={recentAttempts} />
     </Shell>
   );
 }

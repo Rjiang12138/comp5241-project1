@@ -1,9 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession, requireStaff } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { generateOutline, readSource, type SourceDoc } from "@/lib/generate";
-import { createCourseFromOutline } from "@/lib/store";
+import { SourceReadError } from "@/lib/source";
+import { isEmptyMaterialPlaceholder, MAX_VISUAL_PAGES, parseVisualPages, validateStudioInput } from "@/lib/studio-input";
+import { createCourseFromOutline, recordUnattachedAiRuns } from "@/lib/store";
+import { checkOutline } from "@/lib/outline-quality";
+import type { AiAuditEntry } from "@/lib/ai-audit";
 import type { StudioState } from "./state";
 
 /**
@@ -19,17 +23,26 @@ import type { StudioState } from "./state";
  * which is what "Compare with last draft" implies the product allows.
  */
 
-const MAX_BYTES = 12 * 1024 * 1024;
+async function retainUnattachedRuns(actorId: string, runs: AiAuditEntry[]): Promise<boolean> {
+  if (!runs.length) return true;
+  const rejected = runs.map((run) => run.outcome === "used" || run.outcome === "template"
+    ? { ...run, outcome: "rejected" as const, metadata: { ...run.metadata, reason: "course_not_saved" } } : run);
+  try {
+    await recordUnattachedAiRuns(actorId, rejected);
+    revalidatePath("/studio");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function generateCourseAction(_previous: StudioState, formData: FormData): Promise<StudioState> {
-  await requireStaff();
-  const session = await getSession();
-  if (session.role === "learner") {
-    return { status: "error", message: "Only instructors and admins can generate a course." };
-  }
+  const session = await requireStaff();
 
   const title = String(formData.get("title") ?? "").trim();
   const brief = String(formData.get("brief") ?? "").trim();
+  const includeVisuals = formData.get("includeVisuals") === "on";
+  const visualPageRange = String(formData.get("visualPages") ?? "").trim();
 
   const rawAudience = String(formData.get("audience") ?? "mixed");
   const audience = rawAudience === "non_cs" || rawAudience === "cs" ? rawAudience : "mixed";
@@ -37,42 +50,38 @@ export async function generateCourseAction(_previous: StudioState, formData: For
   const requested = Number(formData.get("minutes") ?? 45);
   const minutes = Number.isFinite(requested) ? Math.min(120, Math.max(15, Math.round(requested))) : 45;
 
-  const uploads = formData
-    .getAll("material")
-    .filter((entry): entry is File => entry instanceof File && entry.size > 0 && entry.size <= MAX_BYTES);
-
-  if (uploads.length === 0 && brief.length < 20) {
+  const entries = formData.getAll("material");
+  if (entries.some((entry) => !(entry instanceof File))) {
     return {
       status: "error",
-      message: "Add a source file, or write at least a sentence about what learners should be able to do.",
+      message: "Choose source files using the material picker, or remove the upload and use the brief alone.",
     };
   }
+  // Browsers submit an unnamed empty File when an optional picker is unused.
+  // A named zero-byte file is a real selection and must report an error.
+  const uploads = (entries as File[]).filter((entry) => !isEmptyMaterialPlaceholder(entry));
+  const inputError = validateStudioInput({ title, brief, files: uploads, includeVisuals, visualPageRange });
+  if (inputError) return { status: "error", message: inputError };
+  const visualPages = parseVisualPages(visualPageRange).pages;
 
   const docs: SourceDoc[] = [];
-  const rejected: string[] = [];
   for (const upload of uploads) {
     try {
-      docs.push(await readSource(upload));
-    } catch {
-      // One unreadable deck should not throw away the other three.
-      rejected.push(upload.name);
-    }
-  }
-
-  // No material is a supported case, not an error: the brief is itself a source.
-  // It is passed as `brief` rather than disguised as a one-page "brief.md" file,
-  // so the generation log can say where the outline came from.
-  if (docs.length === 0) {
-    if (rejected.length > 0) {
+      docs.push(await readSource(upload, {
+        includeVisuals,
+        visualPages: visualPages.length > 0 ? visualPages : undefined,
+        maxVisualPages: MAX_VISUAL_PAGES,
+      }));
+    } catch (error) {
+      // Do not save a course that silently omits part of the selected material.
+      const runs = [...docs.flatMap((doc) => doc.visual?.auditRuns ?? []), ...(error instanceof SourceReadError ? error.auditRuns : [])];
+      const logged = await retainUnattachedRuns(session.userId, runs);
       return {
         status: "error",
-        message: `Could not read ${rejected.join(", ")}. Text-based PDFs work; scans need OCR.`,
-      };
-    }
-    if (brief.trim().length === 0) {
-      return {
-        status: "error",
-        message: "Nothing to work from: add a slide deck, or write a sentence about what learners should be able to do.",
+        message: (error instanceof SourceReadError
+          ? `${error.message} Remove or replace this file, then try again. No course was saved.`
+          : `${upload.name}: could not read this file. Remove or replace it, then try again. No course was saved.`) +
+          (logged ? "" : " The AI attempt record could not be saved."),
       };
     }
   }
@@ -80,10 +89,17 @@ export async function generateCourseAction(_previous: StudioState, formData: For
   const outline = await generateOutline(docs, { minutes, audience, title, brief });
 
   if (outline.modules.length === 0) {
+    const logged = await retainUnattachedRuns(session.userId, outline.auditRuns ?? []);
     return {
       status: "error",
-      message: "No sections found in that material. A slide deck with titles works better than a scanned PDF.",
+      message: `No usable sections found. Add teaching text or describe the learning outcomes in the brief.${logged ? "" : " The AI attempt record could not be saved."}`,
     };
+  }
+
+  const qualityError = checkOutline(outline.modules, minutes, outline.template, docs.some((doc) => !!doc.visual));
+  if (qualityError) {
+    const logged = await retainUnattachedRuns(session.userId, outline.auditRuns ?? []);
+    return { status: "error", message: `${qualityError} Please revise the material or try again. No course was saved.${logged ? "" : " The AI attempt record could not be saved."}` };
   }
 
   const courseId = await createCourseFromOutline({
@@ -103,6 +119,6 @@ export async function generateCourseAction(_previous: StudioState, formData: For
     status: "ok",
     outline,
     courseId,
-    message: rejected.length > 0 ? `Skipped ${rejected.join(", ")} — could not read them.` : undefined,
+    message: docs.flatMap((doc) => doc.warnings ?? []).join(" ") || undefined,
   };
 }

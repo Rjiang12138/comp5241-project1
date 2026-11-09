@@ -192,7 +192,7 @@ function quiz(input: AuthorInput): ActivityContent {
       {
         prompt: `Which of these does “${input.moduleTitle}” claim?`,
         options,
-        answer: 0,
+        answer: answerIndex,
         explain: `The module's objective, in the instructor's words: “${input.objective}”`,
       },
     ],

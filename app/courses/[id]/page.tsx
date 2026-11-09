@@ -4,7 +4,7 @@ import AutoSubmitInput, { AutoSubmitSelect } from "@/components/AutoSubmitInput"
 import { Shell } from "@/components/Shell";
 import { requireStaff } from "@/lib/auth";
 import { FORMATS, audienceLabel, formatLabel, formatPill, statusLabel, statusPill } from "@/lib/format";
-import { courseAnalytics, courseMinutes, getCourse, learnerProgress } from "@/lib/store";
+import { courseAiAudit, courseAnalytics, courseMinutes, getCourse, learnerProgress } from "@/lib/store";
 import {
   addActivityAction,
   addModuleAction,
@@ -52,6 +52,18 @@ function relative(date: Date | null): string {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
+function auditDetails(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const data = value as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof data.fileName === "string") parts.push(data.fileName);
+  if (Array.isArray(data.pages) && data.pages.every((page) => Number.isInteger(page) && page > 0)) parts.push(`PDF pages ${data.pages.join(", ")}`);
+  if (typeof data.reason === "string") parts.push(data.reason);
+  if (typeof data.httpStatus === "number") parts.push(`HTTP ${data.httpStatus}`);
+  if (data.sent === false) parts.push("request not sent");
+  return parts.join(" · ");
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const course = await getCourse(id);
@@ -63,7 +75,7 @@ export default async function CourseEditorPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ roster?: string; filled?: string }>;
+  searchParams: Promise<{ roster?: string; filled?: string; review?: string }>;
 }) {
   const { id } = await params;
   const query = await searchParams;
@@ -76,9 +88,10 @@ export default async function CourseEditorPage({
   const totalMinutes = await courseMinutes(course.id);
   const activityCount = course.modules.reduce((sum, m) => sum + m.activities.length, 0);
   const formatOptions = FORMATS.map((format) => ({ value: format, label: formatLabel(format) }));
-  const [analytics, progress] = await Promise.all([
+  const [analytics, progress, aiAudit] = await Promise.all([
     courseAnalytics(course.id, null),
     learnerProgress(course.id),
+    courseAiAudit(course.id),
   ]);
   const medianMinutes = (() => {
     const values = progress.map((row) => row.minutesDone).sort((a, b) => a - b);
@@ -138,12 +151,50 @@ export default async function CourseEditorPage({
           </form>
           <form action={publishCourseAction}>
             <input type="hidden" name="courseId" value={course.id} />
+            {aiAudit.runs.length > 0 ? (
+              <label className="tiny" style={{ display: "block", maxWidth: "290px", marginBottom: "6px" }}>
+                <input type="checkbox" name="confirmAiReview" required />{" "}
+                I reviewed this course and any AI interpretations before publishing.
+              </label>
+            ) : null}
             <button className="btn btn-sm btn-primary" type="submit">
               Publish v{course.version + 1}
             </button>
           </form>
         </div>
       </div>
+
+      {query.review === "required" || query.review === "content-added" ? (
+        <div className="card card-pad" role="alert" style={{ marginBottom: "16px", background: "#fffdf5", borderColor: "#fde9c8" }}>
+          {query.review === "required"
+            ? "Review the course and confirm before publishing."
+            : "New activity content was added. Review it, then confirm and publish again."}
+        </div>
+      ) : null}
+
+      {aiAudit.runs.length > 0 ? (
+        <div className="card" style={{ marginBottom: "16px" }}>
+          <div className="card-head"><h3>Generation and review record</h3></div>
+          <div className="card-body" style={{ fontSize: "12.4px", lineHeight: 1.7 }}>
+            {aiAudit.runs.map((run) => (
+              <div key={run.id} style={{ marginBottom: "8px" }}>
+                <b>{run.purpose === "vision" ? "PDF visual analysis" : "Course outline"}</b>{" · "}
+                {run.outcome === "legacy" ? "older record; original review and usage unknown" : run.outcome}{" · "}
+                {run.provider ?? (run.outcome === "template" ? "built-in template" : "provider unknown")} · {run.model}<br />
+                <span className="tiny muted">
+                  Prompt {run.promptVersion} · {(run.latencyMs / 1000).toFixed(1)} s · input tokens {run.outcome === "template" ? "not applicable" : run.outcome === "legacy" ? "unknown" : run.tokensIn ?? "unknown"} · output tokens {run.outcome === "template" ? "not applicable" : run.outcome === "legacy" ? "unknown" : run.tokensOut ?? "unknown"} · cost {run.outcome === "template" ? "not applicable" : "unknown"}
+                </span>
+                {auditDetails(run.metadata) ? <div className="tiny muted">{auditDetails(run.metadata)}</div> : null}
+              </div>
+            ))}
+            <div className="tiny muted" style={{ marginTop: "8px" }}>
+              {aiAudit.reviews.length > 0
+                ? `Version ${aiAudit.reviews[0].courseVersion.version} was confirmed by ${aiAudit.reviews[0].reviewer.name} on ${aiAudit.reviews[0].createdAt.toISOString().slice(0, 10)}. Review again after changes.`
+                : "No teacher review confirmation has been recorded."}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {filled !== null ? (
         <div
