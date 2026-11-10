@@ -183,10 +183,11 @@ Vercel itself does not require it. `npx vercel deploy` uploads the working
 directory and builds it, with no repository involved. That path is not used
 here, for three reasons:
 
-1. **`main` has no `package.json`.** Until the branch is merged, importing the
-   repository gives Vercel a folder containing `prototype/`, `docs/` and a
-   static `index.html` — a GitHub Pages site, not a Next.js app. The framework
-   preset has to be set to **Next.js** by hand or the build is a static copy.
+1. **A static `index.html` used to sit at the repository root.** Before the
+   merge, importing the repository gave Vercel a folder containing `prototype/`,
+   `docs/` and that file — a GitHub Pages site, not a Next.js app. It has been
+   removed, so the preset now resolves on its own; if a deploy still builds a
+   static copy, the framework preset is wrong.
 2. **A CLI deploy cannot be traced to a commit.** The dashboard shows an
    upload, not a SHA, so "this URL is the code we reviewed" stops being
    checkable — which is the whole point of the preview link on a board card.
@@ -231,8 +232,8 @@ worth knowing before a demo. The one-line mitigation, if you want it, is to gate
 - [ ] `/studio` names the provider it will use (`ChatAnywhere · gpt-4o-mini` or
       `template-v1`), and the name matches the keys you actually set
 - [ ] The preview root (`/`) shows the Praxis workspace, **not** the static
-      `index.html` that GitHub Pages uses — if it shows the static one, the
-      project was detected as "Other" instead of "Next.js"
+      `prototype/index.html` — if it shows the prototype, the project was
+      detected as "Other" instead of "Next.js"
 - [ ] The course editor saves: change a module title, reload, the change survives
 - [ ] `/admin` redirects to `/login` when signed in as an instructor, and renders
       when signed in as admin
