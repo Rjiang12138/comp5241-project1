@@ -41,29 +41,29 @@ Status legend: **P** pass · **F** fail (see defect log) · **—** not written 
 
 | ID | Requirement | Scenario | Expected | Level | Status |
 | --- | --- | --- | --- | --- | --- |
-| CE-01 | R6 | Rename a module and click away | New title persists after reload | e2e | — |
-| CE-02 | R6 | Add a module | Appears last, numbering stays 01…0n | e2e | — |
-| CE-03 | R6 | Move a module down, then up | Returns to the original order | e2e | — |
-| CE-04 | R6 | Delete a module | Module and its activities are gone; later modules renumber | e2e | — |
-| CE-05 | R6 | Add an activity to a module | Row appears with default format and 8 min | e2e | — |
-| CE-06 | R6 | Change an activity format | Pill and select agree after reload | e2e | — |
-| CE-07 | R6 | Set activity minutes to 0 or a negative number | Rejected; previous value kept | unit | — |
-| CE-08 | R3 | Course total minutes equals the sum of activity minutes | Header matches the table | unit | — |
-| CE-09 | R3 | Publish | Status becomes Published, version increments, a version row is added | e2e | — |
-| CE-10 | R3 | Publish twice | Two version rows, version +2, no duplicates | e2e | — |
-| CE-11 | R6 | Save course settings with an empty title | Falls back to "Untitled course", never a blank heading | unit | — |
-| CE-12 | R3 | Open a course id that does not exist | 404 page, not a crash | e2e | — |
+| CE-01 | R6 | Rename a module and click away | New title persists after reload | e2e | P |
+| CE-02 | R6 | Add a module | Appears last, numbering stays 01…0n | e2e | P |
+| CE-03 | R6 | Move a module down, then up | Returns to the original order | e2e | P |
+| CE-04 | R6 | Delete a module | Module and its activities are gone; later modules renumber | e2e | P |
+| CE-05 | R6 | Add an activity to a module | Row appears with default format and 8 min | e2e | P |
+| CE-06 | R6 | Change an activity format | Pill and select agree after reload | e2e | P |
+| CE-07 | R6 | Set activity minutes to 0 or a negative number | Rejected; previous value kept | unit | **F** → D-25 |
+| CE-08 | R3 | Course total minutes equals the sum of activity minutes | Header matches the table | unit | P |
+| CE-09 | R3 | Publish | Status becomes Published, version increments, a version row is added | e2e | P |
+| CE-10 | R3 | Publish twice | Two version rows, version +2, no duplicates | e2e | P |
+| CE-11 | R6 | Save course settings with an empty title | Falls back to "Untitled course", never a blank heading | unit | P |
+| CE-12 | R3 | Open a course id that does not exist | 404 page, not a crash | e2e | P |
 
 ### 3.2 Admin (R8, admin minimum)
 
 | ID | Requirement | Scenario | Expected | Level | Status |
 | --- | --- | --- | --- | --- | --- |
-| AD-01 | admin | Create a cohort with a code and instructor | Row appears with the chosen instructor | e2e | — |
-| AD-02 | admin | Create a cohort with an empty code | Form does nothing, no empty row | unit | — |
-| AD-03 | admin | Reassign a cohort's instructor | Cohort and its courses show the new owner | e2e | — |
-| AD-04 | admin | Learner count on the cohort row | Equals the enrolments for that cohort | unit | — |
-| AD-05 | admin | Instructor opens `/admin` | Redirected to `/login`; no data rendered | e2e | — |
-| AD-06 | admin | Admin opens `/admin` | Console renders | e2e | — |
+| AD-01 | admin | Create a cohort with a code and instructor | Row appears with the chosen instructor | e2e | P |
+| AD-02 | admin | Create a cohort with an empty code | Form does nothing, no empty row | unit | P |
+| AD-03 | admin | Reassign a cohort's instructor | Cohort and its courses show the new owner | e2e | **F** → D-27 |
+| AD-04 | admin | Learner count on the cohort row | Equals the enrolments for that cohort | unit | P |
+| AD-05 | admin | Instructor opens `/admin` | Redirected to `/login`; no data rendered | e2e | P |
+| AD-06 | admin | Admin opens `/admin` | Console renders | e2e | P |
 
 ### 3.3 Access and session
 
@@ -85,13 +85,14 @@ own kind of lie.
 
 ### 3.4 Deployment smoke (run on the preview URL, every merge)
 
-| ID | Scenario | Expected |
-| --- | --- | --- |
-| SM-01 | `/` | Landing renders, no console error |
-| SM-02 | All six routes | 200, no blank page |
-| SM-03 | `/courses` | Six courses, owner names, version pills |
-| SM-04 | Edit a module on the preview | Change survives a reload within the session |
-| SM-05 | Bundle size | First load JS under 250 kB per route |
+| ID | Scenario | Expected | Status |
+| --- | --- | --- | --- |
+| SM-01 | `/` | Landing renders, no console error | P |
+| SM-02 | `/` `/login` `/learn` `/courses` `/studio` `/insights` `/path` `/settings` `/admin` | 200, no blank page | P |
+| SM-03 | `/courses` | Course cards with owner names and version pills — six on a clean database, more is also a pass if the extra ones are drafts | P (6 local, 8 online) |
+| SM-04 | Edit a module on the preview | Change survives a reload within the session | P (local, same walk as CE-01) |
+| SM-05 | Bundle size | First load JS under 250 kB per route | P (103–113 kB) |
+| SM-06 | Upload a 4–8 MB PDF to `/studio` | A readable error or a successful upload — never a silent failure | **not run** — Vercel caps the request body at 4.5 MB and that cap sits in front of Next, so this cannot be checked locally |
 
 ## 4. End-to-end suite (week 10)
 
@@ -167,9 +168,20 @@ Filed as a GitHub issue with the bug template, labelled `type:bug` and
 | D-21 | Every activity in a generated course was rendered by `fallback()`, so a quiz asked "Which statement about <module title> is defensible?" with three obviously wrong options | blocker | fixed | §8.13 — bodies are written into `Activity.payload` at generation, publish, or on demand |
 | D-22 | Five of the six courses were real, complete, and unreachable: `/learn` always opened the first enrolment | blocker | fixed | §8.14 — all six published, the cohort enrolled in all six, and `/learn` is a shelf |
 | D-23 | `/` and `/studio` were still rendered from the prototype, with the course and cohort counts typed into the markup | major | fixed | §8.15 — both render through `Shell`, and `components/ported/` is gone |
+| D-24 | The editor offers `Mini-game` and `Narrated slides`; the player cannot render either, so a learner gets a reading article with a `Mini-game` pill | major | **open** | `UNBUILT_FORMATS` is defined at `lib/activity-content.ts:811` and referenced nowhere. R4 owns the renderers; the fix is not a `select` option removal by R3 |
+| D-25 | A non-positive minutes value is replaced by the default 8 instead of keeping the previous value | minor | **open** | `num()` at `app/courses/actions.ts:36` returns `fallback` whenever the parse fails. Needs a validation message, which is a UI decision |
+| D-26 | Minutes have no upper bound — `9999` was accepted, producing a 10 029-minute course | minor | **open** | same expression, no ceiling |
+| D-27 | `assignInstructor()` moved the cohort and left every course with the old owner, contradicting the page's own copy | major | fixed | one `$transaction` that also runs `course.updateMany({ where: { cohortId } })` |
+| D-28 | `listCourses()` had no filter and `/courses/[id]` only asked `requireStaff()`, so any instructor could open, edit and publish another instructor's course | major | fixed | listing marks non-owned cards `Read only` and does not link them; the editor redirects a non-owner to `/courses?denied=owner`; admins keep full reach |
+| D-29 | `Open learner view` on a draft course shows the learner shelf, not a preview | major | **open** | `getLearnerView()` recognises enrolments only and the editor's `preview` flag is never passed through |
 
 D-01 and D-02 are the same defect twice: a test that trusted the screen instead
 of the database. Both were found by reading the table, not the toast.
+
+D-28 is the mirror image, and the more uncomfortable one: a permission hole that
+every case in §3 passed on the day it shipped, because the requirement never said
+"a course belongs to its owner" — the `/courses` screen said it, in a sentence
+nobody had implemented.
 
 A defect is only "fixed" when the case that found it passes on the preview URL,
 not when the code is merged.
@@ -189,10 +201,17 @@ Point 5 is the part that is hard to fake and easy to grade.
 
 ## 8. Current status
 
-Week 9. No automated suite exists yet. `tsc` and `next build` run in CI on every
-push, and the smoke cases (SM-01…SM-05) are run by hand on the preview before a
-merge. Everything marked `—` above is scheduled, not done — and the report will
-say so.
+Week 11. The 62 unit tests in §2 exist and pass; `tsc` and `next build` run in
+CI on every push. All 32 cases in §3 have now been walked in a browser against
+**both** the local server and the deployed URL: 30 pass, 2 fail (CE-07 → D-25,
+AD-03 → D-27), and SM-06 was added during the run and has not been executed.
+The results, the environment line, and the six new defects are in
+`docs/test-report.md`; the click-through version of §3 is
+`docs/manual-test-checklist.md`. Playwright is still **not written**, so none of
+the e2e cases have an automated spec behind them.
+
+The 8.x subsections below are the week 9 and week 10 runs, kept as they were
+written so that the later numbers can be checked against the earlier ones.
 
 ### 8.1 Manual smoke run against the Neon database
 
