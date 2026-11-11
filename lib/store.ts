@@ -439,7 +439,14 @@ export async function createCohort(input: {
 }
 
 export async function assignInstructor(cohortId: string, instructorId: string): Promise<void> {
-  await prisma.cohort.update({ where: { id: cohortId }, data: { instructorId } });
+  // The cohort row is not the only thing that changes hands: the admin screen
+  // says "re-points the cohort and every course attached to it", so the courses
+  // move too. One transaction, because a cohort that says Chan while its courses
+  // still say Kwok is the exact half-state this function used to leave behind.
+  await prisma.$transaction([
+    prisma.cohort.update({ where: { id: cohortId }, data: { instructorId } }),
+    prisma.course.updateMany({ where: { cohortId }, data: { ownerId: instructorId } }),
+  ]);
 }
 
 /**

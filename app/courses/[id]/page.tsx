@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import AutoSubmitInput, { AutoSubmitSelect } from "@/components/AutoSubmitInput";
 import { Shell } from "@/components/Shell";
 import { requireStaff } from "@/lib/auth";
@@ -84,6 +84,14 @@ export default async function CourseEditorPage({
   const session = await requireStaff(`/courses/${id}`);
   const course = await getCourse(id);
   if (!course) notFound();
+
+  // A course belongs to the instructor who owns it. `requireStaff()` answers
+  // "are you staff", which is not the same question: without this check any
+  // instructor could open any course id and every save would be a silent
+  // takeover. Admins keep full reach — reassigning courses is their job.
+  if (session.role !== "admin" && course.ownerId !== session.userId) {
+    redirect("/courses?denied=owner");
+  }
 
   const totalMinutes = await courseMinutes(course.id);
   const activityCount = course.modules.reduce((sum, m) => sum + m.activities.length, 0);
