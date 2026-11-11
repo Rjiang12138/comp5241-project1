@@ -4,8 +4,11 @@ Everything a new teammate — or a marker who wants to check our claims — need
 get Praxis running locally and on a public URL. It gets a version bump whenever
 the deployment changes.
 
-Last verified: 2026-10-31, commit `cebeb3e` on `feat/end-to-end-prototype`
-(`v1.2-handover`).
+**Live at <https://comp5241-project1.vercel.app/>** — built from `main` at
+`24423be`, first deployed 2026-11-10.
+
+Last verified: 2026-11-11, against the URL above, from a browser and from
+`curl`, signed in as the admin, both instructors and a learner.
 
 ---
 
@@ -25,15 +28,15 @@ were generated from `prototype/*.html` have been deleted.
 | Path builder, insights, admin, settings | real — queries and writes, no counters |
 | Session and role guard | real, demo provider (a `praxis_uid` cookie; see §5) |
 | Database | **Postgres on Neon**, wired through Prisma |
-| LLM calls | **wired** — ChatAnywhere first, OpenRouter as the spare (`lib/llm.ts`) |
-| Mini-games, narrated slides, language switching | **not built**, and the screens say so |
+| LLM calls | **wired** — DeepSeek first, ChatAnywhere second, OpenRouter as the spare (`lib/llm.ts`) |
+| Mini-games, narrated slides, language switching | **not built**. `/learn` says so in words, and the player has no renderer for either format — but the course editor still offers both in its format select, so an instructor can pick one and the learner silently gets a reading article. Logged as D-24 in `docs/test-plan.md` §6 |
 
 Data lives in a Neon Postgres branch (`production`). `lib/store.ts` is the only
 module that talks to it; everything else speaks its signatures.
 
 ## 2. Prerequisites
 
-- Node.js **20 or newer** (`node -v`)
+- Node.js **22 or newer** (`node -v`; `package.json` declares `engines.node >= 22`)
 - npm 10+
 - A Neon project with a `production` branch, and its connection string
 
@@ -88,15 +91,21 @@ Copy `.env.example` to `.env.local`, or let the Neon CLI write it
 | `DATABASE_URL_UNPOOLED` | for DDL | Direct endpoint. `prisma db push` and migrations need it; PgBouncer cannot run DDL. |
 | `AUTH_SECRET` | no (week 10) | Cookie signing key for the real auth provider. `openssl rand -base64 32`. |
 | `NEXT_PUBLIC_APP_URL` | no | Absolute URLs in outbound links. Set to the deployed origin. |
-| `CHATANYWHERE_API_KEY` | no | **Primary** model provider. Empty means the chain starts at OpenRouter. |
+| `DEEPSEEK_API_KEY` | no | **First** provider. Empty means the chain starts at ChatAnywhere. |
+| `DEEPSEEK_BASE_URL` | no | Default `https://api.deepseek.com`. |
+| `DEEPSEEK_MODEL` | no | Default `deepseek-flash`. |
+| `DEEPSEEK_VISION_MODEL` | no | Image-input model used when a deck is rendered to pictures; default `deepseek-flash`. |
+| `CHATANYWHERE_API_KEY` | no | **Second** provider. Empty means the chain starts at OpenRouter. |
 | `CHATANYWHERE_BASE_URL` | no | Default `https://api.chatanywhere.tech/v1`. |
 | `CHATANYWHERE_MODEL` | no | Default `gpt-4o-mini`. |
+| `CHATANYWHERE_VISION_MODEL` | no | Separate image-input model; default `gpt-4o-mini`. |
 | `LLM_MIN_GAP_MS` | no | Minimum gap between two model calls, default `4000`. Raise it if a 429 shows up. |
-| `OPENROUTER_API_KEY` | no | The spare. Used only when the primary declines — no key, 429, bad key, empty reply. |
+| `OPENROUTER_API_KEY` | no | The spare. Used only when the earlier providers decline — no key, 429, bad key, empty reply. |
 | `OPENROUTER_MODEL` | no | Pins one model instead of the spare's free-tier chain. |
+| `OPENROUTER_VISION_MODEL` | no | Explicit image-input model; the text-only free chain is never used for vision. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | no | Read by nothing. |
 
-Both keys being empty is a **supported state**: `/studio` falls back to the
+All three keys being empty is a **supported state**: `/studio` falls back to the
 built-in template and the screen says `Model: template-v1`. Nothing else in the
 app calls a model.
 
@@ -109,15 +118,15 @@ One-time, about ten minutes. Two of those minutes are the environment variables 
 the build fails without them, because `next build` evaluates every page and every
 page reads the database through `getSession()`.
 
-**Current status: pushed, not merged.** `feat/end-to-end-prototype` is on origin
-and 24 commits ahead of `main`, which still holds the mid-term prototype. Vercel
-can build the branch directly; nothing has to be merged first.
+**Current status: deployed from `main`.** The week 9–10 work was merged in PR #1
+on 2026-11-10. `feat/end-to-end-prototype` and `feat/platform-postgres` were
+deleted after the merge, so `main` is the only branch and the only thing Vercel
+builds.
 
-1. If you are deploying your own copy, push the branch you want built —
-   `git push origin feat/end-to-end-prototype`. If the review is done, merge it
-   into `main` and deploy that instead; the two are the same code.
+1. If you are deploying your own copy, import the repository and leave the
+   production branch at `main`.
 2. In Vercel: **Add New → Project → Import** `comp5241-project1`, and set the
-   production branch to the one you pushed.
+   production branch to `main`.
 3. Framework preset: **Next.js** (detected). Leave build command, output
    directory and install command at their defaults — `postinstall` already runs
    `prisma generate`, and `build` runs it again before `next build`.
@@ -129,32 +138,46 @@ can build the branch directly; nothing has to be merged first.
    | `DATABASE_URL` | the pooled string (`-pooler` in the host) |
    | `DATABASE_URL_UNPOOLED` | the direct string, no `-pooler` |
 
-   Copy both out of `.env.local`; they are the same Neon project the local build
-   uses, so the preview reads the same rows. `prisma generate` does not connect,
+   Copy both out of `.env.local`. **They do not have to point at the same Neon
+   project as your local build.** The URL above runs against a different Neon
+   project than the developer machine does, which is why `/courses` shows eight
+   courses there and seven locally: both are correct, they are two seeds. Point
+   your own deploy at whichever project you own — just do not run `db:reset`
+   against someone else's. `prisma generate` does not connect,
    but any page that renders does, and a missing variable surfaces as
    `Environment variable not found: DATABASE_URL` at build time.
 
    Then add the model keys, if you want generation to call a model on the
-   deployed URL: `CHATANYWHERE_API_KEY`, and optionally `OPENROUTER_API_KEY` as
-   the spare. Without either, the deployed studio still generates courses from
-   the template and the screen says so. Add them to Production and Preview
-   separately — Vercel does not copy variables between environments.
+   deployed URL: `DEEPSEEK_API_KEY` first, `CHATANYWHERE_API_KEY` second, and
+   optionally `OPENROUTER_API_KEY` as the spare. Without any of them, the
+   deployed studio still generates courses from the template and the screen says
+   so. Add them to Production and Preview separately — Vercel does not copy
+   variables between environments.
 
 5. **Deploy.**
 
-After that, every pull request gets its own preview URL. That is deliberate:
-the board links to the preview, so a reviewer can click a finished task and land
-on the thing it describes instead of reading a description of it.
+After that, every pull request gets its own preview URL. That is deliberate: a
+review comment can point at the preview, so a reviewer clicks a finished task and
+lands on the thing it describes instead of reading a description of it.
 
-Production URL: `<fill in after the first deploy>`
+**Production URL: <https://comp5241-project1.vercel.app/>**
+
+Verified 2026-11-10 from a machine with no session cookie: `/` answers `200` and
+renders the Praxis workspace (title `Praxis — AI course studio for software
+engineering`); `/learn`, `/studio` and `/insights` answer `307` to `/login`,
+which is the role guard doing its job rather than an error. First request after
+a cold start took ~5 s; the pages themselves are server-rendered on demand.
 
 ### Two things a serverless default will break
 
 **1. Function duration.** Vercel's default limit for a function is 10 s, and a
 generation measured on this machine takes **13.6 s** end to end — one model call
-plus the activity bodies. Without a higher limit the request is killed halfway
-and the studio shows a timeout rather than a course. Both routes that call a
-model therefore declare:
+plus the activity bodies. The model call alone re-measured **4.4 s** on
+2026-11-11 against ChatAnywhere, so the 13.6 s is the pessimistic end of the
+range rather than a fixed cost; both are above what a 10 s limit survives
+comfortably. Without a higher limit the request is killed halfway and the studio
+shows a timeout rather than a course. Both routes that call a model therefore
+declare:
 
 ```ts
 export const maxDuration = 60;   // app/studio/page.tsx, app/path/page.tsx
@@ -190,25 +213,35 @@ here, for three reasons:
    static copy, the framework preset is wrong.
 2. **A CLI deploy cannot be traced to a commit.** The dashboard shows an
    upload, not a SHA, so "this URL is the code we reviewed" stops being
-   checkable — which is the whole point of the preview link on a board card.
-3. **Previews come from pull requests.** A CLI deploy produces one URL. The
-   board's definition of done asks for a URL per finished task, and that only
-   exists when Vercel is watching the repository.
+   checkable — which is the whole point of a preview link in a review.
+3. **Previews come from pull requests.** A CLI deploy produces one URL; a pull
+   request produces one per change, and that only exists when Vercel is watching
+   the repository.
 
 So: merge first, then import. If the repository cannot be pushed at all, the
 CLI is a legitimate fallback for a demo — write down that the URL was uploaded
 rather than built from `main`, because the difference matters at review time.
 
-### Do not run `db:seed` or `db:reset` on the deployed database
+### Do not run `db:seed` or `db:reset` against a database you do not own
 
-There is one database, not one per environment. The `db:*` scripts are local
-tools that point at `.env.local`; running them against the same Neon project
-from a deployed environment would wipe the rows the preview is showing. The
-in-app reset button on `/settings` does the same thing deliberately, and is
-admin-only for that reason.
+A deployment and a developer machine can point at two different Neon projects —
+the URL above does. The `db:*` scripts are local tools that read `.env.local`,
+and they are destructive: whichever project that file names is the one they wipe.
+
+So the question is not "which environment am I in" but "which connection string
+is in front of me". Check it before running either script:
+
+```bash
+node -e "const u=new URL(process.env.DATABASE_URL);console.log(u.host)"
+```
+
+The in-app reset button on `/settings` does the same thing deliberately, and is
+admin-only for that reason. On a public URL it is reachable by anyone who can set
+a cookie — see below.
 
 Schema changes are `npm run db:push` from a developer machine, once, and they
-apply to the single database everything shares.
+apply to whichever database that machine is pointed at. A deploy on a different
+Neon project needs its own `db:push` before it will render anything.
 
 ### Before the URL is shared with anyone outside the group
 
@@ -223,8 +256,8 @@ worth knowing before a demo. The one-line mitigation, if you want it, is to gate
 ### Deployment checklist (run before every merge to `main`)
 
 - [ ] `npm run build` passes locally
-- [ ] The preview URL opens and `/courses` renders seven courses, six of them
-      published
+- [ ] The preview URL opens and `/courses` renders at least six courses, with the
+      extra drafts (if any) marked as drafts
 - [ ] `/learn` as a learner shows the shelf of six courses, not a single course
 - [ ] `/studio` → **Generate outline** finishes on the deployed URL. This is the
       one that fails if `maxDuration` is missing or the plan caps below it: a
@@ -290,7 +323,7 @@ history is part of the evidence we are graded on.
 | `Can't reach database server` | branch suspended, or wrong region | Neon console → wake the branch; check the host in the string |
 | Tables exist but pages are empty | schema pushed without seeding | `npm run db:seed` |
 | `/admin` bounces to `/login` | signed in as instructor | pick **A. Tse** on the sign-in page |
-| A ported screen has no interactivity | `PrototypeScripts` not mounted | confirm `app/layout.tsx` still renders it |
+| `/studio` generation dies at ~10 s on the deployed URL | the plan caps the function below `maxDuration` | raise the plan limit; see §5 |
 | Build fails on `useSearchParams` | page not marked dynamic | add `export const dynamic = "force-dynamic"` |
 | `prisma generate` fails in CI | client generated before install | `npm ci` runs `postinstall`; check the lockfile is committed |
 
@@ -304,9 +337,22 @@ history is part of the evidence we are graded on.
   learner wrote the right call; it cannot tell that the call works.
 - **No cross-instance rate limit.** `lib/llm.ts` serialises calls in memory, which
   is one queue per process. See §5 for what that means on a serverless platform.
-- **No automated end-to-end suite.** `docs/test-plan.md` specifies it; the
-  manual smoke run in §5 is what stands in for it.
+- **No browser-driven end-to-end suite.** `docs/test-plan.md` §4 specifies one.
+  What exists instead is a set of `node --test` unit tests over the pure parts of
+  the pipeline — `npm run test:quiz`, `test:studio-quality`, `test:ai-audit`,
+  `test:studio-input`, `test:analytics`, `test:r4-demo` — plus a click-through run
+  of all 32 cases in `docs/manual-test-checklist.md`, whose results are in
+  `docs/test-report.md`. Nothing drives a real browser automatically, so "the
+  button moves the row" is still checked by hand.
 - **Mini-games, narrated slides, language switching.** Modelled in the schema and
-  the copy, deliberately unbuilt, and every screen that mentions them says so.
+  the copy, and the player card reserves a slot for them. **Not built** — R3 lists
+  both formats, and these are the two of the eight without a player. The slot is
+  empty, not closed: the taxonomy already accepts `game` and `narrated_slides`,
+  so adding a player does not need a schema change. What is wrong today is that
+  the course editor offers both formats as choices, so an instructor can assign
+  one and the learner silently receives a reading article while the activity pill
+  still says `Mini-game`. That is D-24, open, and it is R4's renderer that closes
+  it, not a `select` option removal by R3.
 
-Each of these is a named task on the board, not an oversight.
+Each of these is either a limit of the demo build or an open slot, and it is
+recorded here rather than left to be discovered at review.
