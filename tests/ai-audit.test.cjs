@@ -248,13 +248,21 @@ test("the course editor shows recorded usage and an explicit review control", as
     promptVersion: "vision-test", latencyMs: 1500, tokensIn: 22, tokensOut: null,
     metadata: { fileName: "lecture.pdf", pages: [2] } };
   const course = { id: "c1", title: "Course", code: "C", term: "T", minutes: 45, version: 1,
-    status: "draft", audience: "mixed", brief: "", modules: [], learners: [], versions: [], cohort: null };
+    status: "draft", audience: "mixed", brief: "", ownerId: "teacher-1",
+    modules: [], learners: [], versions: [], cohort: null };
   const load = createLoader({
     "next/link": ({ href, children }) => React.createElement("a", { href }, children),
-    "next/navigation": { notFound: () => { throw new Error("not found"); } },
+    // The editor sends a non-owner to /courses?denied=owner, so `redirect` has
+    // to exist here. It throws rather than returning: if the fixture ever drifts
+    // out of the owner's hands again, the failure should name the redirect that
+    // was taken, not "redirect is not a function".
+    "next/navigation": {
+      notFound: () => { throw new Error("not found"); },
+      redirect: (url) => { throw new Error(`redirected to ${url}`); },
+    },
     "@/components/AutoSubmitInput": { __esModule: true, default: () => null, AutoSubmitSelect: () => null },
     "@/components/Shell": { Shell: ({ children, actions }) => React.createElement("main", null, actions, children) },
-    "@/lib/auth": { requireStaff: async () => ({ userId: "teacher-1", name: "Teacher" }) },
+    "@/lib/auth": { requireStaff: async () => ({ userId: "teacher-1", name: "Teacher", role: "instructor" }) },
     "@/lib/store": { getCourse: async () => course, courseMinutes: async () => 0,
       courseAnalytics: async () => ({ learners: 0, activeThisWeek: 0, averageProgress: 0, finishedAll: 0, nudge: [], insight: null }),
       learnerProgress: async () => [], courseAiAudit: async () => ({ runs: [run], reviews: [] }) },
